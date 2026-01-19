@@ -18,19 +18,15 @@ app = Flask(__name__)
 app.secret_key = 'digital_peer_support_secret'
 
 # ==========================================
-# 1. DATABASE CONFIGURATION & HELPERS
-# ==========================================
-
-# ==========================================
 # 1. DATABASE CONFIGURATION
 # ==========================================
 
 db_config = {
-    'host': 'peer-support-system-fatinshamirah212-93b4.j.aivencloud.com',
-    'user': 'avnadmin',
-    'password': os.environ.get('DB_PASSWORD'),
-    'database': 'defaultdb',
-    'port': 26591
+    'host': os.environ.get('DB_HOST', 'localhost'),
+    'user': os.environ.get('DB_USER', 'root'),
+    'password': os.environ.get('DB_PASSWORD', '211521'),
+    'database': os.environ.get('DB_NAME', 'peer_support_db'),
+    'port': int(os.environ.get('DB_PORT', 3306)) 
 }
 
 # ==========================================
