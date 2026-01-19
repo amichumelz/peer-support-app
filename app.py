@@ -28,7 +28,7 @@ app.secret_key = 'digital_peer_support_secret'
 db_config = {
     'host': 'peer-support-system-fatinshamirah212-93b4.j.aivencloud.com',
     'user': 'avnadmin',
-    'password': 'AVNS_qclUfTKSrqQyzmN9pz4',
+    'password': os.environ.get('DB_PASSWORD'),
     'database': 'defaultdb',
     'port': 26591
 }
