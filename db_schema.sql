@@ -70,7 +70,7 @@ CREATE TABLE Post (
     post_id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
     content TEXT NOT NULL,
-    image_url VARCHAR(255),
+    image_url VARCHAR(1000),
     is_anonymous BOOLEAN DEFAULT FALSE,
     likes INT DEFAULT 0,
     is_retweet BOOLEAN DEFAULT FALSE,

@@ -75,6 +75,15 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads'
 # Ensure folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+ALLOWED_EXTENSIONS = {
+    'pdf', 'png', 'jpg', 'jpeg', 'gif', 
+    'mp4', 'mp3', 'mov', 'mpeg', 'mpg', 
+    'doc', 'docx', 'pptx', 'xls', 'xlsx'
+}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 def update_student_score(student_id, amount):
     """
     Updates student score with a cap of 100 and min of 0.
@@ -859,22 +868,38 @@ def forum():
         content = request.form['content']
         anon = 1 if 'anon' in request.form else 0
         
-        # HANDLE FILE UPLOAD
-        file = request.files.get('file')
-        image_url = ""
-        if file and file.filename != '':
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            image_url = f"/static/uploads/{filename}"
+        # --- NEW FILE UPLOAD LOGIC ---
+        files = request.files.getlist('file')
+
+        if len(files) > 5:
+            flash("Exceed 5 files! Please select 5 or fewer files only.")
+            return redirect('/forum')
+        
+        file_urls = []
+        
+        for file in files[:5]: # Limit to 5 files
+            if file and file.filename != '' and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                
+                # Ensure directory exists
+                if not os.path.exists(app.config['UPLOAD_FOLDER']):
+                    os.makedirs(app.config['UPLOAD_FOLDER'])
+                
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                file_urls.append(f"/static/uploads/{filename}")
+        
+        # Join URLs with a comma to store in one database column
+        image_url_str = ",".join(file_urls)
+        # -----------------------------
         
         execute_db("INSERT INTO Post (student_id, content, image_url, is_anonymous) VALUES (%s, %s, %s, %s)", 
-                   (user['student_id'], content, image_url, anon))
+                   (user['student_id'], content, image_url_str, anon))
         
         execute_db("UPDATE Student SET points = LEAST(100, points + %s) WHERE student_id = %s", (CONFIG['points_post'], user['student_id']))
         flash("Posted!")
         return redirect('/forum')
     
-    # Fetch posts with author names and counts
+    # Fetch posts
     sql = """
         SELECT p.*, s.full_name, s.points, a.username, 
         DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i') as date_str,
@@ -889,100 +914,115 @@ def forum():
     
     for p in raw_posts:
             author = "Anonymous" if p['is_anonymous'] else p['full_name']
+
+            # --- NEW DISPLAY LOGIC (Split commas back to list) ---
+            file_list = []
+            if p.get('image_url'):
+                file_list = [f.strip() for f in p['image_url'].split(',') if f.strip()]
+            # -----------------------------------------------------
+        
             posts_ui.append({
-                'id': p['post_id'], 'content': p['content'], 'author': author, 
-                'points': p['points'], # <--- ADDED THIS
-                'image': p['image_url'], 'likes': p['likes'], 'date': p['date_str'],
+                'id': p['post_id'], 
+                'content': p['content'], 
+                'author': author, 
+                'points': p['points'], 
+                'files': file_list,  # Changed from 'image' to 'files'
+                'likes': p['likes'], 
+                'date': p['date_str'],
                 'comments_count': p['comment_count']
             })
 
-    content = """
+content = """
         <div style="max-width:600px; margin:0 auto;">
-            <div class="card">
-                <form method="POST" enctype="multipart/form-data"> 
-                    <div style="display:flex; gap:15px;">
-                        <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
-                        <div style="flex:1;">
-                            <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
-                            
-                            <input type="file" name="file" style="border-bottom:1px solid #eee; border-radius:0; padding:5px;">
-                            
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-                                <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
-                                <button class="btn btn-blue">Tweet</button>
+    <div class="card">
+        <form method="POST" enctype="multipart/form-data"> 
+            <div style="display:flex; gap:15px;">
+                <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
+                <div style="flex:1;">
+                    <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
+                    
+                    <input type="file" name="file" multiple style="border-bottom:1px solid #eee; border-radius:0; padding:5px; width:100%;">
+                    <small style="color:gray;">Max 5 files (Images, Video, Audio, or Docs)</small>
+                    
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                        <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
+                        <button class="btn btn-blue">Tweet</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    {% for post in posts %}
+    <div class="card" style="padding-bottom:10px;">
+        <div class="tweet-header">
+            <div class="tweet-avatar">{{ post.author[0] }}</div>
+            <div>
+                <strong class="{% if post.points >= 95 %}rainbow-text{% endif %}">{{ post.author }}</strong> 
+                <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
+            </div>
+        </div>
+        
+        <div style="padding-left: 50px;">
+            <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
+            
+            <div class="post-attachments">
+                {% for file_path in post.files %}
+                    {% set ext = file_path.lower().split('.')[-1] %}
+                    
+                    {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
+                        <img src="{{ file_path }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
+                    
+                    {% elif ext in ['mp4', 'mov', 'mpeg', 'mpg'] %}
+                        <video controls style="width:100%; border-radius:12px; margin-bottom:10px;">
+                            <source src="{{ file_path }}" type="video/{{ ext if ext != 'mov' else 'quicktime' }}">
+                        </video>
+                    
+                    {% elif ext == 'mp3' %}
+                        <audio controls style="width:100%; margin-bottom:10px;">
+                            <source src="{{ file_path }}" type="audio/mpeg">
+                        </audio>
+
+                    {% else %}
+                        <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:1.2rem;">
+                                {% if ext == 'pdf' %}📕{% elif ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
+                            </span>
+                            <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
+                                <strong>{{ file_path.split('/')[-1] }}</strong>
                             </div>
+                            <a href="{{ file_path }}" download style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;">Download</a>
                         </div>
-                    </div>
-                </form>
-            </div>
-
-            {% for post in posts %}
-            <div class="card" style="padding-bottom:10px; cursor:pointer;">
-                
-                <div class="tweet-header">
-                    <div class="tweet-avatar">{{ post.author[0] }}</div>
-                    <div>
-                        <strong class="{% if post.points >= 95 %}rainbow-text{% endif %}">
-                            {{ post.author }}
-                        </strong> 
-                        <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
-                    </div>
-                </div>
-                
-                <div style="padding-left: 50px;">
-                    <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
-                    {% if post.image %}
-                        <img src="{{ post.image }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
                     {% endif %}
-                    
-                    <div class="tweet-actions">
-                        <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
-                        <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
-                        <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;">⚠</button>
-                    </div>
-                </div>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </div>
-
-        <div id="report-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
-            <div class="card" style="max-width:400px; margin:100px auto;">
-                <h3>Report Content</h3>
-                <form action="/submit_report" method="POST">
-                    <input type="hidden" name="type" id="report-type">
-                    <input type="hidden" name="id" id="report-id">
-                    
-                    <label>Reason:</label>
-                    <select name="reason" required>
-                        <option value="Harassment">Harassment</option>
-                        <option value="Spam">Spam</option>
-                        <option value="Inappropriate">Inappropriate Content</option>
-                        <option value="Self-Harm">Self-Harm Risk</option>
-                    </select>
-                    
-                    <div style="text-align:right; margin-top:15px;">
-                        <button type="button" onclick="document.getElementById('report-modal').style.display='none'" class="btn btn-outline">Cancel</button>
-                        <button class="btn btn-red">Submit Report</button>
-                    </div>
-                </form>
+            
+            <div class="tweet-actions">
+                <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
+                <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
+                <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;">⚠</button>
             </div>
         </div>
-
-        <script>
-        function openReportModal(type, id) {
-            document.getElementById('report-type').value = type;
-            document.getElementById('report-id').value = id;
-            document.getElementById('report-modal').style.display = 'block';
-        }
-        </script>
-    """
-    return render_page(content, posts=posts_ui)
-
+    </div>
+    {% endfor %}
+</div>
+"""
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
 def post_detail(pid):
     # Fetch post
-    p = query_db("SELECT * FROM Post WHERE post_id = %s", (pid,), one=True)
+    p = query_db("""
+        SELECT p.*, s.full_name, a.username 
+        FROM Post p 
+        JOIN Student s ON p.student_id = s.student_id 
+        JOIN Account a ON s.account_id = a.account_id 
+        WHERE p.post_id = %s
+    """, (pid,), one=True)
+
     if not p: return redirect('/forum')
+    
+    p['files'] = []
+    if p.get('image_url'):
+        p['files'] = [f.strip() for f in p['image_url'].split(',') if f.strip()]
     
     if request.method == 'POST':
         user = get_user_by_id(session['user_id'])
