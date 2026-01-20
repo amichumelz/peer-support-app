@@ -762,38 +762,30 @@ def dashboard():
 def student_dashboard(user):
     user['is_restricted'] = user['score'] < CONFIG['restriction_threshold']
     
+    # 1. Fetch Announcements
     anns = query_db("SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date_str FROM Announcement ORDER BY date DESC LIMIT 3")
     
-    # --- NEW: Fetch Assigned Counselor ---
-    counselor = query_db("""
-        SELECT c.full_name, c.specialization 
-        FROM Assignment a 
-        JOIN Counselor c ON a.counselor_id = c.counselor_id 
-        WHERE a.student_id = %s AND a.status = 'Accepted'
-    """, (user['student_id'],), one=True)
-    # -------------------------------------
+    # 2. Fetch Upcoming Confirmed Sessions (The new logic)
+    # This gets any appointment (Student Booked OR Counselor Assigned) that is 'Confirmed' and in the future
+    sessions = query_db("""
+        SELECT ca.*, c.full_name as counselor_name, 
+               DATE_FORMAT(ca.appointment_date, '%W, %d %M %Y at %H:%i') as date_pretty
+        FROM CounselorAppointment ca
+        JOIN Counselor c ON ca.counselor_id = c.counselor_id
+        WHERE ca.student_id = %s 
+          AND ca.status = 'Confirmed' 
+          AND ca.appointment_date >= NOW()
+        ORDER BY ca.appointment_date ASC
+    """, (user['student_id'],))
 
     content = """
         <div style="display:flex; justify-content:space-between; align-items:end; margin-bottom:20px;">
             <div>
                 <h1 style="margin-bottom:5px;">Hi, {{ user.name }} 👋</h1>
                 <span style="color:var(--sub);">{{ user.program }} Student</span>
-                
-                <div style="margin-top: 10px; font-size: 0.9rem;">
-                    {% if counselor %}
-                        <span style="background: #e6fffa; color: #009688; padding: 5px 10px; border-radius: 20px; font-weight: 600; border: 1px solid #b2f5ea;">
-                            🧑‍⚕️ Counselor: {{ counselor.full_name }} ({{ counselor.specialization }})
-                        </span>
-                    {% else %}
-                        <span style="background: #f7fafc; color: #718096; padding: 5px 10px; border-radius: 20px; font-weight: 600; border: 1px solid #edf2f7;">
-                            ⚪ No counselor assigned
-                        </span>
-                    {% endif %}
-                </div>
             </div>
             
             <div style="text-align:right;">
-                <span class="badge" style="font-size:1rem; background:var(--blue); color:white;">Lvl {{ user.level }}</span>
                 <p style="color:var(--sub); margin-top:5px; font-weight:bold;">{{ user.points }} Points</p>
             </div>
         </div>
@@ -825,6 +817,22 @@ def student_dashboard(user):
                 </form>
             </div>
 
+            <div class="card" style="border-left: 4px solid var(--blue);">
+                <h3>📅 Upcoming Sessions</h3>
+                {% if sessions %}
+                    {% for s in sessions %}
+                        <div style="margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid #f0f0f0;">
+                            <strong>With {{ s.counselor_name }}</strong><br>
+                            <span style="font-size:0.9rem; color:var(--text);">{{ s.date_pretty }}</span><br>
+                            <span style="font-size:0.8rem; color:var(--sub);">Topic: {{ s.reason }}</span>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p style="color:var(--sub); font-size:0.9rem;">No upcoming sessions scheduled.</p>
+                    <a href="/book_appointment" style="font-size:0.85rem; font-weight:bold;">Book Now &rarr;</a>
+                {% endif %}
+            </div>
+
             <div class="card" style="border-left: 4px solid var(--green);">
                 <h3>📢 Announcements</h3>
                 {% for a in announcements %}
@@ -842,7 +850,7 @@ def student_dashboard(user):
             </div>
         </div>
     """
-    return render_page(content, user=user, announcements=anns, counselor=counselor)
+    return render_page(content, user=user, announcements=anns, sessions=sessions)
 
 @app.route('/mood_checkin', methods=['POST'])
 def mood_checkin():
