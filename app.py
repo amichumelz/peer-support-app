@@ -857,6 +857,7 @@ def forum():
     if not user: return redirect('/logout')
 
     if request.method == 'POST':
+        # ... (This part handles posting, it is fine) ...
         if user['score'] < 60:
             flash("Restricted users cannot post.")
             return redirect('/forum')
@@ -864,23 +865,17 @@ def forum():
         content = request.form['content']
         anon = 1 if 'anon' in request.form else 0
         
-        # --- NEW FILE UPLOAD LOGIC ---
         files = request.files.getlist('file')
-
         if len(files) > 5:
             flash("Exceed 5 files! Please select 5 or fewer files only.")
             return redirect('/forum')
         
         file_urls = []
-        
-        for file in files[:5]: # Limit to 5 files
+        for file in files[:5]:
             if file and file.filename != '' and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                
-                # Ensure directory exists
                 if not os.path.exists(app.config['UPLOAD_FOLDER']):
                     os.makedirs(app.config['UPLOAD_FOLDER'])
-                
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 file_urls.append(f"/static/uploads/{filename}")
         
@@ -888,12 +883,11 @@ def forum():
         
         execute_db("INSERT INTO Post (student_id, content, image_url, is_anonymous) VALUES (%s, %s, %s, %s)", 
                    (user['student_id'], content, image_url_str, anon))
-        
         execute_db("UPDATE Student SET points = LEAST(100, points + %s) WHERE student_id = %s", (CONFIG['points_post'], user['student_id']))
         flash("Posted!")
         return redirect('/forum')
     
-    # Fetch posts
+    # --- FETCH POSTS ---
     sql = """
         SELECT p.*, s.full_name, s.points, a.username, 
         DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i') as date_str,
@@ -905,12 +899,13 @@ def forum():
     """
     raw_posts = query_db(sql)
     
-    # Safety Check: If DB fails, make empty list so loop doesn't crash
+    # 1. Safety Check: If DB fails, prevent crash
     if raw_posts is None:
         raw_posts = []
 
     posts_ui = []
     
+    # 2. Process Posts (The Loop)
     for p in raw_posts:
         author = "Anonymous" if p['is_anonymous'] else p['full_name']
 
@@ -929,7 +924,8 @@ def forum():
             'comments_count': p['comment_count']
         })
 
-    # <--- CRITICAL: This MUST be indented to match 'def forum():', NOT 'for p in raw_posts:'
+    # 3. HTML Content (CRITICAL: THIS MUST BE OUTSIDE THE LOOP)
+    # Notice how 'content' starts all the way to the left, aligned with 'posts_ui = []'
     content = """
         <div style="max-width:600px; margin:0 auto;">
             <div class="card">
@@ -938,10 +934,8 @@ def forum():
                         <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
                         <div style="flex:1;">
                             <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
-                            
                             <input type="file" name="file" multiple style="border-bottom:1px solid #eee; border-radius:0; padding:5px; width:100%;">
                             <small style="color:gray;">Max 5 files (Images, Video, Audio, or Docs)</small>
-                            
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
                                 <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
                                 <button class="btn btn-blue">Tweet</button>
@@ -960,27 +954,21 @@ def forum():
                         <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
                     </div>
                 </div>
-                
                 <div style="padding-left: 50px;">
                     <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
-                    
                     <div class="post-attachments">
                         {% for file_path in post.files %}
                             {% set ext = file_path.lower().split('.')[-1] %}
-                            
                             {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
                                 <img src="{{ file_path }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
-                            
                             {% elif ext in ['mp4', 'mov', 'mpeg', 'mpg'] %}
                                 <video controls style="width:100%; border-radius:12px; margin-bottom:10px;">
                                     <source src="{{ file_path }}" type="video/{{ ext if ext != 'mov' else 'quicktime' }}">
                                 </video>
-                            
                             {% elif ext == 'mp3' %}
                                 <audio controls style="width:100%; margin-bottom:10px;">
                                     <source src="{{ file_path }}" type="audio/mpeg">
                                 </audio>
-
                             {% else %}
                                 <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
                                     <span style="font-size:1.2rem;">
@@ -994,7 +982,6 @@ def forum():
                             {% endif %}
                         {% endfor %}
                     </div>
-                    
                     <div class="tweet-actions">
                         <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
                         <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
@@ -1006,6 +993,7 @@ def forum():
         </div>
     """
     
+    # 4. RETURN (CRITICAL: MUST BE OUTSIDE THE LOOP)
     return render_page(content, posts=posts_ui)
 
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
