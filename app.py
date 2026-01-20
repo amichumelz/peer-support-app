@@ -917,7 +917,8 @@ def forum():
             if file and file.filename != '':
                 try:
                     # Upload directly to Cloudinary
-                    upload_result = cloudinary.uploader.upload(file)
+                    # resource_type="auto" allows Videos, Music, and Documents (Excel/PDF)
+                    upload_result = cloudinary.uploader.upload(file, resource_type="auto", public_id=file.filename)
                     # Get the secure URL (starts with https://)
                     file_urls.append(upload_result['secure_url'])
                 except Exception as e:
