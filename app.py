@@ -928,81 +928,84 @@ def forum():
                 'comments_count': p['comment_count']
             })
 
-content = """
-        <div style="max-width:600px; margin:0 auto;">
-    <div class="card">
-        <form method="POST" enctype="multipart/form-data"> 
-            <div style="display:flex; gap:15px;">
-                <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
-                <div style="flex:1;">
-                    <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
+        content = """
+                <div style="max-width:600px; margin:0 auto;">
+            <div class="card">
+                <form method="POST" enctype="multipart/form-data"> 
+                    <div style="display:flex; gap:15px;">
+                        <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
+                        <div style="flex:1;">
+                            <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
+                            
+                            <input type="file" name="file" multiple style="border-bottom:1px solid #eee; border-radius:0; padding:5px; width:100%;">
+                            <small style="color:gray;">Max 5 files (Images, Video, Audio, or Docs)</small>
+                            
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                                <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
+                                <button class="btn btn-blue">Tweet</button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            {% for post in posts %}
+            <div class="card" style="padding-bottom:10px;">
+                <div class="tweet-header">
+                    <div class="tweet-avatar">{{ post.author[0] }}</div>
+                    <div>
+                        <strong class="{% if post.points >= 95 %}rainbow-text{% endif %}">{{ post.author }}</strong> 
+                        <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
+                    </div>
+                </div>
+                
+                <div style="padding-left: 50px;">
+                    <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
                     
-                    <input type="file" name="file" multiple style="border-bottom:1px solid #eee; border-radius:0; padding:5px; width:100%;">
-                    <small style="color:gray;">Max 5 files (Images, Video, Audio, or Docs)</small>
+                    <div class="post-attachments">
+                        {% for file_path in post.files %}
+                            {% set ext = file_path.lower().split('.')[-1] %}
+                            
+                            {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
+                                <img src="{{ file_path }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
+                            
+                            {% elif ext in ['mp4', 'mov', 'mpeg', 'mpg'] %}
+                                <video controls style="width:100%; border-radius:12px; margin-bottom:10px;">
+                                    <source src="{{ file_path }}" type="video/{{ ext if ext != 'mov' else 'quicktime' }}">
+                                </video>
+                            
+                            {% elif ext == 'mp3' %}
+                                <audio controls style="width:100%; margin-bottom:10px;">
+                                    <source src="{{ file_path }}" type="audio/mpeg">
+                                </audio>
+
+                            {% else %}
+                                <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
+                                    <span style="font-size:1.2rem;">
+                                        {% if ext == 'pdf' %}📕{% elif ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
+                                    </span>
+                                    <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
+                                        <strong>{{ file_path.split('/')[-1] }}</strong>
+                                    </div>
+                                    <a href="{{ file_path }}" download style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;">Download</a>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
                     
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-                        <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
-                        <button class="btn btn-blue">Tweet</button>
+                    <div class="tweet-actions">
+                        <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
+                        <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
+                        <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;">⚠</button>
                     </div>
                 </div>
             </div>
-        </form>
-    </div>
-
-    {% for post in posts %}
-    <div class="card" style="padding-bottom:10px;">
-        <div class="tweet-header">
-            <div class="tweet-avatar">{{ post.author[0] }}</div>
-            <div>
-                <strong class="{% if post.points >= 95 %}rainbow-text{% endif %}">{{ post.author }}</strong> 
-                <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
-            </div>
+            {% endfor %}
         </div>
-        
-        <div style="padding-left: 50px;">
-            <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
-            
-            <div class="post-attachments">
-                {% for file_path in post.files %}
-                    {% set ext = file_path.lower().split('.')[-1] %}
-                    
-                    {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
-                        <img src="{{ file_path }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
-                    
-                    {% elif ext in ['mp4', 'mov', 'mpeg', 'mpg'] %}
-                        <video controls style="width:100%; border-radius:12px; margin-bottom:10px;">
-                            <source src="{{ file_path }}" type="video/{{ ext if ext != 'mov' else 'quicktime' }}">
-                        </video>
-                    
-                    {% elif ext == 'mp3' %}
-                        <audio controls style="width:100%; margin-bottom:10px;">
-                            <source src="{{ file_path }}" type="audio/mpeg">
-                        </audio>
+        """
 
-                    {% else %}
-                        <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
-                            <span style="font-size:1.2rem;">
-                                {% if ext == 'pdf' %}📕{% elif ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
-                            </span>
-                            <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
-                                <strong>{{ file_path.split('/')[-1] }}</strong>
-                            </div>
-                            <a href="{{ file_path }}" download style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;">Download</a>
-                        </div>
-                    {% endif %}
-                {% endfor %}
-            </div>
-            
-            <div class="tweet-actions">
-                <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
-                <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
-                <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;">⚠</button>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-"""
+    return render_page(content, posts=posts_ui)
+
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
 def post_detail(pid):
     # Fetch post
