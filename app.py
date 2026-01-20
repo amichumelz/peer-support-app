@@ -851,6 +851,7 @@ def submit_appeal():
     return redirect('/dashboard')
 
 # --- FORUM FEATURES ---
+# --- FORUM FEATURES ---
 @app.route('/forum', methods=['GET', 'POST'])
 def forum():
     user = get_user_by_id(session.get('user_id'))
@@ -906,30 +907,37 @@ def forum():
         ORDER BY p.created_at DESC
     """
     raw_posts = query_db(sql)
+    
+    # Safety check: If DB fails, prevent crash
+    if raw_posts is None:
+        raw_posts = []
+        flash("Database connection error or no posts found.")
+
     posts_ui = []
     
     for p in raw_posts:
-            author = "Anonymous" if p['is_anonymous'] else p['full_name']
+        author = "Anonymous" if p['is_anonymous'] else p['full_name']
 
-            # --- NEW DISPLAY LOGIC (Split commas back to list) ---
-            file_list = []
-            if p.get('image_url'):
-                file_list = [f.strip() for f in p['image_url'].split(',') if f.strip()]
-            # -----------------------------------------------------
+        # --- NEW DISPLAY LOGIC (Split commas back to list) ---
+        file_list = []
+        if p.get('image_url'):
+            file_list = [f.strip() for f in p['image_url'].split(',') if f.strip()]
+        # -----------------------------------------------------
         
-            posts_ui.append({
-                'id': p['post_id'], 
-                'content': p['content'], 
-                'author': author, 
-                'points': p['points'], 
-                'files': file_list,  # Changed from 'image' to 'files'
-                'likes': p['likes'], 
-                'date': p['date_str'],
-                'comments_count': p['comment_count']
-            })
+        posts_ui.append({
+            'id': p['post_id'], 
+            'content': p['content'], 
+            'author': author, 
+            'points': p['points'], 
+            'files': file_list,  # Changed from 'image' to 'files'
+            'likes': p['likes'], 
+            'date': p['date_str'],
+            'comments_count': p['comment_count']
+        })
 
-        content = """
-                <div style="max-width:600px; margin:0 auto;">
+    # <--- IMPORTANT: This block is now UN-INDENTED (Outside the loop)
+    content = """
+        <div style="max-width:600px; margin:0 auto;">
             <div class="card">
                 <form method="POST" enctype="multipart/form-data"> 
                     <div style="display:flex; gap:15px;">
@@ -1002,8 +1010,8 @@ def forum():
             </div>
             {% endfor %}
         </div>
-        """
-
+    """
+    # <--- IMPORTANT: This return must align with 'def forum():'
     return render_page(content, posts=posts_ui)
 
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
