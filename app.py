@@ -1024,7 +1024,7 @@ def forum():
                                     <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
                                         <strong>{{ file_path.split('/')[-1] }}</strong>
                                     </div>
-                                    <a href="{{ file_path }}" download style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;">Download</a>
+                                    <a href="{{ file_path.replace('/upload/', '/upload/fl_attachment/') if ext == 'pdf' else file_path }}" download style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;">Download</a>
                                 </div>
                             {% endif %}
                         {% endfor %}
