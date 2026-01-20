@@ -851,7 +851,6 @@ def submit_appeal():
     return redirect('/dashboard')
 
 # --- FORUM FEATURES ---
-# --- FORUM FEATURES ---
 @app.route('/forum', methods=['GET', 'POST'])
 def forum():
     user = get_user_by_id(session.get('user_id'))
@@ -885,9 +884,7 @@ def forum():
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 file_urls.append(f"/static/uploads/{filename}")
         
-        # Join URLs with a comma to store in one database column
         image_url_str = ",".join(file_urls)
-        # -----------------------------
         
         execute_db("INSERT INTO Post (student_id, content, image_url, is_anonymous) VALUES (%s, %s, %s, %s)", 
                    (user['student_id'], content, image_url_str, anon))
@@ -908,34 +905,31 @@ def forum():
     """
     raw_posts = query_db(sql)
     
-    # Safety check: If DB fails, prevent crash
+    # Safety Check: If DB fails, make empty list so loop doesn't crash
     if raw_posts is None:
         raw_posts = []
-        flash("Database connection error or no posts found.")
 
     posts_ui = []
     
     for p in raw_posts:
         author = "Anonymous" if p['is_anonymous'] else p['full_name']
 
-        # --- NEW DISPLAY LOGIC (Split commas back to list) ---
         file_list = []
         if p.get('image_url'):
             file_list = [f.strip() for f in p['image_url'].split(',') if f.strip()]
-        # -----------------------------------------------------
         
         posts_ui.append({
             'id': p['post_id'], 
             'content': p['content'], 
             'author': author, 
             'points': p['points'], 
-            'files': file_list,  # Changed from 'image' to 'files'
+            'files': file_list,
             'likes': p['likes'], 
             'date': p['date_str'],
             'comments_count': p['comment_count']
         })
 
-    # <--- IMPORTANT: This block is now UN-INDENTED (Outside the loop)
+    # <--- CRITICAL: This MUST be indented to match 'def forum():', NOT 'for p in raw_posts:'
     content = """
         <div style="max-width:600px; margin:0 auto;">
             <div class="card">
@@ -1011,7 +1005,7 @@ def forum():
             {% endfor %}
         </div>
     """
-    # <--- IMPORTANT: This return must align with 'def forum():'
+    
     return render_page(content, posts=posts_ui)
 
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
