@@ -5,6 +5,8 @@ import os
 import random 
 import string 
 import smtplib
+import cloudinary
+import cloudinary.uploader
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash, make_response
@@ -28,6 +30,13 @@ db_config = {
     'database': os.environ.get('DB_NAME', 'peer_support_db'),
     'port': int(os.environ.get('DB_PORT', 3306)) 
 }
+
+cloudinary.config(
+    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
+    api_key = os.environ.get('CLOUDINARY_API_KEY'),
+    api_secret = os.environ.get('CLOUDINARY_API_SECRET'),
+    secure = True
+)
 
 # ==========================================
 # EMAIL CONFIGURATION
@@ -865,20 +874,27 @@ def forum():
         content = request.form['content']
         anon = 1 if 'anon' in request.form else 0
         
+        # --- CLOUDINARY UPLOAD LOGIC ---
         files = request.files.getlist('file')
+
         if len(files) > 5:
             flash("Exceed 5 files! Please select 5 or fewer files only.")
             return redirect('/forum')
         
         file_urls = []
-        for file in files[:5]:
-            if file and file.filename != '' and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                if not os.path.exists(app.config['UPLOAD_FOLDER']):
-                    os.makedirs(app.config['UPLOAD_FOLDER'])
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                file_urls.append(f"/static/uploads/{filename}")
         
+        for file in files[:5]: # Limit to 5 files
+            if file and file.filename != '':
+                try:
+                    # Upload directly to Cloudinary
+                    upload_result = cloudinary.uploader.upload(file)
+                    # Get the secure URL (starts with https://)
+                    file_urls.append(upload_result['secure_url'])
+                except Exception as e:
+                    print(f"Upload Error: {e}")
+                    flash("Error uploading one of the files.")
+        
+        # Join URLs with a comma to store in DB
         image_url_str = ",".join(file_urls)
         
         execute_db("INSERT INTO Post (student_id, content, image_url, is_anonymous) VALUES (%s, %s, %s, %s)", 
