@@ -863,7 +863,7 @@ def mood_checkin():
 
     # Daily Check Logic: check if a record exists for this student where the date is TODAY
     already_checked_in = query_db("""
-        SELECT mood_id FROM MoodCheckIn 
+        SELECT checkin_id FROM MoodCheckIn 
         WHERE student_id = %s AND DATE(created_at) = CURDATE()
     """, (user['student_id'],), one=True)
 
