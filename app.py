@@ -88,33 +88,65 @@ ALLOWED_EXTENSIONS = {
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def update_student_score(student_id, amount):
-    """
-    Updates student score with a cap of 100 and min of 0.
-    amount: Positive integer to add, or negative to subtract.
-    """
+def update_student_score(student_id, amount, action_type="System Action"):
+
     conn = get_db_connection()
     if not conn: return
     cursor = conn.cursor(dictionary=True)
     
-    # 1. Get current score
-    cursor.execute("SELECT score_percentage FROM Student WHERE student_id = %s", (student_id,))
+    # 1. Get current points
+    cursor.execute("SELECT points FROM Student WHERE student_id = %s", (student_id,))
     res = cursor.fetchone()
     if not res: 
         conn.close()
         return
 
-    current_score = res['score_percentage']
-    new_score = current_score + amount
+    current_points = res['points']
+    actual_change = amount
+    
+    # 2. Check Daily Limit for GAINS (Positive points only)
+    if amount > 0:
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Calculate how many points were earned TODAY from ScoreTransaction
+        cursor.execute("""
+            SELECT SUM(points_change) as daily_total 
+            FROM ScoreTransaction 
+            WHERE student_id = %s 
+              AND DATE(transaction_date) = %s 
+              AND points_change > 0
+        """, (student_id, today))
+        
+        daily_res = cursor.fetchone()
+        daily_earned = daily_res['daily_total'] if daily_res and daily_res['daily_total'] else 0
+        
+        # For this system, we keep the daily limit at 10  
+        DAILY_LIMIT = 10 
+        
+        if daily_earned >= DAILY_LIMIT:
+            print(f"Daily limit ({DAILY_LIMIT}) reached for Student {student_id}.")
+            actual_change = 0 
+        elif daily_earned + amount > DAILY_LIMIT:
+            actual_change = DAILY_LIMIT - daily_earned
 
-    # 2. Enforce Caps (0 to 100)
-    if new_score > 100:
-        new_score = 100
-    elif new_score < 0:
-        new_score = 0
+    # 3. Calculate New Score (Clamp between 0 and CONFIG['max_score'])
+    new_score = current_points + actual_change
+    
+    # Use dynamic Max Score from Config
+    if new_score > CONFIG['max_score']: new_score = CONFIG['max_score']
+    if new_score < 0: new_score = 0
 
-    # 3. Update DB
-    cursor.execute("UPDATE Student SET score_percentage = %s WHERE student_id = %s", (new_score, student_id))
+    # 4. Update Student Table (Sync points and score_percentage)
+    cursor.execute("UPDATE Student SET points = %s, score_percentage = %s WHERE student_id = %s", 
+                   (new_score, new_score, student_id))
+    
+    # 5. Log transaction to ScoreTransaction (Only if points changed)
+    if actual_change != 0: 
+        cursor.execute("""
+            INSERT INTO ScoreTransaction (student_id, action_type, points_change, resulting_score) 
+            VALUES (%s, %s, %s, %s)
+        """, (student_id, action_type, actual_change, new_score))
+
     conn.commit()
     conn.close()
     return new_score
@@ -880,11 +912,7 @@ def mood_checkin():
     execute_db("INSERT INTO MoodCheckIn (student_id, mood_level, severity_level, note) VALUES (%s, %s, %s, 'User check-in')", 
                (user['student_id'], lvl, severity))
     
-    # 3. Update Gamification Points (XP)
-    new_points = min(100, user['points'] + CONFIG['points_checkin'])
-    execute_db("UPDATE Student SET points = %s WHERE student_id = %s", (new_points, user['student_id']))
-    
-    # 4. CALCULATE WELLNESS BATTERY (Start 100%, Deduct/Add based on history)
+    # 3. CALCULATE WELLNESS BATTERY (Start 100%, Deduct/Add based on history)
     # Fetch all logs for this student ordered by time
     history = query_db("SELECT mood_level FROM MoodCheckIn WHERE student_id = %s ORDER BY checkin_date ASC", (user['student_id'],))
     
