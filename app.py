@@ -864,14 +864,13 @@ def mood_checkin():
     # Daily Check Logic: check if a record exists for this student where the date is TODAY
     already_checked_in = query_db("""
         SELECT checkin_id FROM MoodCheckIn 
-        WHERE student_id = %s AND DATE(created_at) = CURDATE()
+        WHERE student_id = %s AND DATE(checkin_date) = CURDATE()
     """, (user['student_id'],), one=True)
 
     if already_checked_in:
         flash("Mood today had already been checked in. Please try again tomorrow.")
         return redirect('/dashboard')
-    
-    # default 3 if didn't checked in today
+   
     lvl = int(request.form.get('level', 3))
     
     # Logic: 1 or 2 is Critical, else Low severity for individual logs
