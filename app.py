@@ -992,7 +992,7 @@ def forum():
         
         execute_db("INSERT INTO Post (student_id, content, image_url, is_anonymous) VALUES (%s, %s, %s, %s)", 
                    (user['student_id'], content, image_url_str, anon))
-        execute_db("UPDATE Student SET points = LEAST(100, points + %s) WHERE student_id = %s", (CONFIG['points_post'], user['student_id']))
+        update_student_score(user['student_id'], CONFIG['points_post'], "Created Post")
         flash("Posted!")
         return redirect('/forum')
     
@@ -1125,7 +1125,7 @@ def post_detail(pid):
         anon = 1 if 'anon' in request.form else 0 #check tickbox from HTML
         execute_db("INSERT INTO Comment (post_id, student_id, content, is_anonymous) VALUES (%s, %s, %s, %s)", 
                    (pid, user['student_id'], content, anon))
-        execute_db("UPDATE Student SET points = LEAST(100, points + %s) WHERE student_id = %s", (CONFIG['points_comment'], user['student_id']))
+        update_student_score(user['student_id'], CONFIG['points_comment'], "Commented")
         return redirect(f'/post_detail/{pid}')
 
     # Fetch comments (Query includes the Like Count as 'db_likes')
@@ -1227,11 +1227,9 @@ def like_post(pid):
         
         # Update the counter on Post table 
         execute_db("UPDATE Post SET likes = likes + 1 WHERE post_id = %s", (pid,))
-    else:
-        # Toggle to Unlike 
-        execute_db("DELETE FROM `Like` WHERE like_id = %s", (existing['like_id'],))
-        execute_db("UPDATE Post SET likes = likes - 1 WHERE post_id = %s", (pid,))
 
+        # --- NEW: GIVE POINTS FOR LIKING ---
+        update_student_score(student['student_id'], CONFIG['points_like'], "Liked a Post")
     return redirect(request.referrer)
 
 # --- LIKE COMMENT (Using the Like Table) ---
