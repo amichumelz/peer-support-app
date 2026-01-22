@@ -873,34 +873,45 @@ def mood_checkin():
    
     lvl = int(request.form.get('level', 3))
     
-    # Logic: 1 or 2 is Critical, else Low severity
+    # Logic: 1 or 2 is Critical
     severity = 'Critical' if lvl <= 2 else 'Low'
     
     # 2. Insert the new Mood Entry
-    # Note: We rely on the database to auto-fill 'checkin_date' with the current timestamp
     execute_db("INSERT INTO MoodCheckIn (student_id, mood_level, severity_level, note) VALUES (%s, %s, %s, 'User check-in')", 
                (user['student_id'], lvl, severity))
     
-    # 3. Update Points
+    # 3. Update Gamification Points (XP)
     new_points = min(100, user['points'] + CONFIG['points_checkin'])
     execute_db("UPDATE Student SET points = %s WHERE student_id = %s", (new_points, user['student_id']))
     
-    # 4. Calculate Overall Mood Percentage (Average of last 14 days)
-    # FIX: Changed 'created_at' to 'checkin_date' here
-    stat = query_db("""
-        SELECT AVG(mood_level) as avg_mood 
-        FROM MoodCheckIn 
-        WHERE student_id = %s 
-        AND checkin_date >= DATE_SUB(NOW(), INTERVAL 14 DAY)
-    """, (user['student_id'],), one=True)
+    # 4. CALCULATE WELLNESS BATTERY (Start 100%, Deduct/Add based on history)
+    # Fetch all logs for this student ordered by time
+    history = query_db("SELECT mood_level FROM MoodCheckIn WHERE student_id = %s ORDER BY checkin_date ASC", (user['student_id'],))
     
-    current_avg = float(stat['avg_mood']) if stat and stat['avg_mood'] else 0
-    percentage = int((current_avg / 5) * 100)
+    current_battery = 100 # Everyone starts at 100%
+    
+    if history:
+        for log in history:
+            m = log['mood_level']
+            if m == 1:   # 😫 1/5: Deduct 20%
+                current_battery -= 20
+            elif m == 2: # 😔 2/5: Deduct 10%
+                current_battery -= 10
+            elif m == 3: # 😐 3/5: Neutral (No change or small drain?) let's say -5 to encourage activity
+                current_battery -= 5
+            elif m == 4: # 🙂 4/5: Recharge 5%
+                current_battery += 5
+            elif m == 5: # 😄 5/5: Recharge 15%
+                current_battery += 15
+            
+            # Clamp between 0 and 100
+            if current_battery > 100: current_battery = 100
+            if current_battery < 0: current_battery = 0
 
     # Flash message
-    msg = f"Mood logged! Your Mental Wellness Score is currently {percentage}%."
-    if percentage < 30:
-        msg += " (Alert: Your score is critical. A counselor may reach out.)"
+    msg = f"Mood logged! Your Mental Wellness Battery is at {current_battery}%."
+    if current_battery < 30:
+        msg += " (Alert: Your battery is critical. Consider booking a session.)"
         
     flash(msg)
     return redirect('/dashboard')
