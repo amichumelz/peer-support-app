@@ -291,16 +291,6 @@ STYLES = """
         }
 
     /* Nav */
-
-    .nav-inner {
-        max-width: 900px; 
-        margin: 0 auto; 
-        padding: 15px 20px; 
-        display: flex; 
-        justify-content: space-between; 
-        align-items: center;
-    }
-    
     .nav { background: rgba(255,255,255,0.95); padding: 15px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(10px); z-index: 100; }
     .nav-brand { font-weight: 800; font-size: 1.3rem; color: var(--blue); }
     .nav-links { display: flex; gap: 25px; }
@@ -314,7 +304,7 @@ STYLES = """
     .card { background: var(--card); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--border); margin-bottom: 20px; }
     
     /* Profile Header */
-    .profile-banner { height: 200px; background: linear-gradient(45deg, #a1c4fd, #c2e9fb); border-radius: 16px 16px 0 0; margin: -21px -21px 0 -21px; position: relative; }
+    .profile-banner { height: 200px; background: linear-gradient(45deg, #a1c4fd, #c2e9fb); border-radius: 16px 16px 0 0; margin: 0; position: relative; }
     .profile-avatar { width: 130px; height: 130px; background: white; border: 4px solid white; border-radius: 50%; position: absolute; bottom: -65px; left: 20px; overflow: hidden; display:flex; align-items:center; justify-content:center; font-size:3rem; color:#ccc; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
     .profile-actions { display: flex; justify-content: flex-end; margin-top: 10px; height: 50px; }
     .profile-info { margin-top: 15px; }
