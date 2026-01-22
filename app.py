@@ -13,14 +13,14 @@ from flask import Flask, render_template_string, request, redirect, url_for, ses
 from datetime import datetime
 import mysql.connector
 from mysql.connector import Error
-from werkzeug.utils import secure_filename
+from datetime import datetime
 
 # initialize Flask application
 app = Flask(__name__)
 app.secret_key = 'digital_peer_support_secret'
 
 # ==========================================
-# 1. DATABASE CONFIGURATION
+# DATABASE CONFIGURATION
 # ==========================================
 
 db_config = {
@@ -41,19 +41,18 @@ cloudinary.config(
 # ==========================================
 # EMAIL CONFIGURATION
 # ==========================================
-# REPLACE THESE WITH YOUR REAL DETAILS
 SMTP_SERVER = "smtp.gmail.com"  # Google's SMTP server
 SMTP_PORT = 587                 # TLS Port
 SENDER_EMAIL = "fatinshamirah212@gmail.com" 
-SENDER_PASSWORD = "iqlmhvdbupcedxji" # Generated App Password (NOT your login pass)
+SENDER_PASSWORD = "iqlmhvdbupcedxji" # App Pass 
 
 # ==========================================
-# 1. UPDATED CONFIG & HELPERS
+# UPDATED CONFIG & HELPERS
 # ==========================================
 
 # Dynamic Configuration (In-memory for this demo)
 CONFIG = {
-    # --- 1. Gamification Keys (Used for Leveling/XP) ---
+    # --- 1. Gamification Keys (Used for System Earn Points) ---
     'points_checkin': 5, 
     'points_post': 5,
     'points_comment': 2,
@@ -75,17 +74,17 @@ CONFIG = {
     'max_score': 100
 }
 
-# Add this near app config
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 # Ensure folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 ALLOWED_EXTENSIONS = {
-    'pdf', 'png', 'jpg', 'jpeg', 'gif', 
+    'png', 'jpg', 'jpeg', 'gif', 
     'mp4', 'mp3', 'mov', 'mpeg', 'mpg', 
     'doc', 'docx', 'pptx', 'xls', 'xlsx'
 }
 
+#getting the file format: right split 1 time, getting the .blablabla 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -120,7 +119,7 @@ def update_student_score(student_id, amount):
     conn.close()
     return new_score
 
-# UC35: Template Library (Kept in memory as it's static data)
+# Template Library (Kept in memory as it's static data)
 PLAN_TEMPLATES = {
     'anxiety': {
         'title': 'Anxiety Management Protocol',
@@ -255,7 +254,7 @@ def add_notification(account_id, message, link=None):
 
 
 # ==========================================
-# 2. UI STYLING (UNCHANGED)
+# UI STYLING 
 # ==========================================
 
 STYLES = """
@@ -265,7 +264,15 @@ STYLES = """
         --blue: #1d9bf0; --red: #f91880; --green: #00ba7c; --orange: #ff9f0a; 
         --shadow: 0 4px 20px rgba(0,0,0,0.08); --border: #eff3f4;
     }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding-bottom: 50px; }
+
+    body { 
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+        background: var(--bg); 
+        color: var(--text); 
+        margin: 0; 
+        padding-bottom: 50px; 
+    }
+
     a { color: var(--blue); text-decoration: none; font-weight: 500; transition: color 0.2s; }
     a:hover { text-decoration: underline; }
     
@@ -281,7 +288,7 @@ STYLES = """
 
         @keyframes rainbowMove {
             to { background-position: 200% center; }
-            }
+        }
 
     /* Nav */
     .nav { background: rgba(255,255,255,0.95); padding: 15px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(10px); z-index: 100; }
@@ -296,7 +303,7 @@ STYLES = """
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
     .card { background: var(--card); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--border); margin-bottom: 20px; }
     
-    /* Twitter Profile Header */
+    /* Profile Header */
     .profile-banner { height: 200px; background: linear-gradient(45deg, #a1c4fd, #c2e9fb); border-radius: 16px 16px 0 0; margin: -21px -21px 0 -21px; position: relative; }
     .profile-avatar { width: 130px; height: 130px; background: white; border: 4px solid white; border-radius: 50%; position: absolute; bottom: -65px; left: 20px; overflow: hidden; display:flex; align-items:center; justify-content:center; font-size:3rem; color:#ccc; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
     .profile-actions { display: flex; justify-content: flex-end; margin-top: 10px; height: 50px; }
@@ -307,7 +314,7 @@ STYLES = """
     .stat-val { font-weight: 700; color: var(--text); }
     .stat-label { color: var(--sub); }
     
-    /* Tweets/Forum */
+    /* Forum */
     .tweet-header { display: flex; gap: 10px; margin-bottom: 5px; }
     .tweet-avatar { width: 40px; height: 40px; background: #eee; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #555; }
     .tweet-actions { display: flex; justify-content: space-between; margin-top: 15px; max-width: 300px; color: var(--sub); font-size: 0.9rem; }
@@ -426,7 +433,7 @@ def render_page(content_html, **kwargs):
     return render_template_string(full_template, style=STYLES, role=role, notifications=notifs, notif_count=len(notifs), **kwargs)
 
 # ==========================================
-# 3. AUTHENTICATION & PUBLIC
+# AUTHENTICATION 
 # ==========================================
 
 @app.route('/')
@@ -486,7 +493,7 @@ def signup():
         if not re.search(r"[\W_]", password):
             flash("Password must contain at least one symbol (e.g., !@#$%).")
             return redirect('/signup')
-        # ---------------------------------
+        
 
         # 1. Create Account
         try:
@@ -498,7 +505,7 @@ def signup():
                     VALUES (%s, %s, 'General', 'New here!', 100, 100)
                 """, (aid, username))
                 
-                flash("Account created! You start with 100 Points.")
+                flash("Account created! ")
                 return redirect('/')
             else:
                 flash("Username or Email might already exist.")
@@ -518,7 +525,8 @@ def signup():
             </div>
             <form method="POST">
                 <input type="text" name="username" placeholder="Username" required>
-                <input type="email" name="email" placeholder="MMU Student Email" required>
+                <input type="email" name="email" placeholder="MMU Student Email" pattern=".+@student\.mmu\.edu\.my" 
+                    title="Please use your official MMU student email (xxxxxxxxxx@student.mmu.edu.my)" required>
                 <input type="password" name="password" placeholder="Password" required>
                 <button class="btn" style="width:100%">Sign Up</button>
             </form>
@@ -553,9 +561,6 @@ def logout():
 # ==========================================
 # FORGOT PASSWORD FLOW (Steps 1-8)
 # ==========================================
-# ==========================================
-# FORGOT PASSWORD FLOW (Steps 1-8)
-# ==========================================
 
 # STEP 1 & 2: Click Forgot Password & Enter Email
 @app.route('/forgot_password')
@@ -566,7 +571,7 @@ def forgot_password():
             <h2>Reset Password</h2>
             <p style="color:var(--sub); margin-bottom:20px;">Enter your email to receive a One-Time Password (OTP).</p>
             <form action="/send_reset_otp" method="POST">
-                <input type="email" name="email" placeholder="Student Email" required>
+                <input type="email" name="email" placeholder="Registered Email" required>
                 <button class="btn" style="width:100%">Send OTP</button>
             </form>
             <a href="/" style="display:block; margin-top:15px; text-align:center;">Back to Login</a>
@@ -584,7 +589,7 @@ def send_reset_otp():
     
     if not account:
         # Security: Don't reveal if email exists or not
-        flash("If that email exists, we have sent an OTP.")
+        flash("Email not exist! ")
         return redirect('/forgot_password')
 
     # 2. Generate 4-digit OTP
@@ -605,7 +610,7 @@ def send_reset_otp():
         body = f"""
         <html>
           <body>
-            <h2>Password Reset Request</h2>
+            <h2>Peer Support System: Password Reset Request</h2>
             <p>Your One-Time Password (OTP) is:</p>
             <h1 style="color: #1d9bf0; letter-spacing: 5px;">{otp}</h1>
             <p>This code expires when you close your browser session.</p>
@@ -622,12 +627,12 @@ def send_reset_otp():
         server.send_message(msg)
         server.quit()
 
-        flash(f"✅ OTP sent to {email}. Please check your inbox.")
+        flash(f"OTP sent to {email}. Please check your inbox.")
         return redirect('/enter_otp')
 
     except Exception as e:
         print(f"Email Error: {e}")
-        flash("❌ Failed to send email. Check server logs or internet connection.")
+        flash("Failed to send email. Check server logs or internet connection.")
         return redirect('/forgot_password')
     
 # STEP 5: Enter OTP Page
@@ -658,11 +663,11 @@ def verify_otp_action():
     system_otp = session.get('reset_otp')
     
     if user_otp == system_otp:
-        # OTP Matches! Mark session as verified
+        # OTP Matches. Mark session as verified
         session['otp_verified'] = True
         return redirect('/reset_new_password')
     else:
-        flash("❌ Invalid OTP. Please try again.")
+        flash("Invalid OTP. Please try again.")
         return redirect('/enter_otp')
 
 # STEP 7: Set New Password Page
@@ -703,7 +708,7 @@ def perform_password_reset():
     
     # 1. Check Matching
     if password != confirm:
-        flash("Passwords do not match.")
+        flash("The password does not match.")
         return redirect('/reset_new_password')
         
     # 2. Check Complexity (Same logic as Signup)
@@ -735,7 +740,7 @@ def clear_notifs():
     return redirect('/dashboard')
 
 # ==========================================
-# 4. DASHBOARD CONTROLLER
+# DASHBOARD CONTROLLER
 # ==========================================
 
 @app.route('/dashboard')
@@ -756,7 +761,7 @@ def dashboard():
     if role == 'counselor': return counselor_dashboard()
 
 # ==========================================
-# 5. STUDENT DASHBOARD & FEATURES
+# STUDENT DASHBOARD & FEATURES
 # ==========================================
 
 def student_dashboard(user):
@@ -765,8 +770,8 @@ def student_dashboard(user):
     # 1. Fetch Announcements
     anns = query_db("SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date_str FROM Announcement ORDER BY date DESC LIMIT 3")
     
-    # 2. Fetch Upcoming Confirmed Sessions (The new logic)
-    # This gets any appointment (Student Booked OR Counselor Assigned) that is 'Confirmed' and in the future
+    # 2. Fetch Upcoming Confirmed Sessions 
+        # gets any appointment (Student Booked OR Counselor Assigned) that is 'Confirmed' 
     sessions = query_db("""
         SELECT ca.*, c.full_name as counselor_name, 
                DATE_FORMAT(ca.appointment_date, '%W, %d %M %Y at %H:%i') as date_pretty
@@ -845,8 +850,8 @@ def student_dashboard(user):
 
             <div class="card">
                 <h3>Quick Actions</h3>
-                <a href="/match" class="btn btn-outline" style="width:100%; margin-bottom:10px; display:block; text-align:center;">🔥 Find Friends (Match Up)</a>
-                <a href="/book_appointment" class="btn btn-outline" style="width:100%; display:block; text-align:center;">📅 Book Counselor</a>
+                <a href="/match" class="btn btn-outline" style="width:80%; margin-bottom:10px; display:block; text-align:center;">🔥 Find Friends (Match Up)</a>
+                <a href="/book_appointment" class="btn btn-outline" style="width:80%; display:block; text-align:center;">📅 Book Counselor</a>
             </div>
         </div>
     """
@@ -855,6 +860,18 @@ def student_dashboard(user):
 @app.route('/mood_checkin', methods=['POST'])
 def mood_checkin():
     user = get_user_by_id(session['user_id'])
+
+    # Daily Check Logic: check if a record exists for this student where the date is TODAY
+    already_checked_in = query_db("""
+        SELECT mood_id FROM MoodCheckIn 
+        WHERE student_id = %s AND DATE(created_at) = CURDATE()
+    """, (user['student_id'],), one=True)
+
+    if already_checked_in:
+        flash("Mood today had already been checked in. Please try again tomorrow.")
+        return redirect('/dashboard')
+    
+    # default 3 if didn't checked in today
     lvl = int(request.form.get('level', 3))
     
     # Logic: 1 or 2 is Critical, else Low severity for individual logs
@@ -867,17 +884,22 @@ def mood_checkin():
     new_points = min(100, user['points'] + CONFIG['points_checkin'])
     execute_db("UPDATE Student SET points = %s WHERE student_id = %s", (new_points, user['student_id']))
     
-    # 3. Calculate Overall Mood Percentage (Average of all logs)
+    # 3. Calculate Overall Mood Percentage (Average of all logs in 14 days)
     # Formula: (Average Level / 5) * 100
-    stat = query_db("SELECT AVG(mood_level) as avg_mood FROM MoodCheckIn WHERE student_id = %s", (user['student_id'],), one=True)
+    stat = query_db("""
+    SELECT AVG(mood_level) as avg_mood 
+    FROM MoodCheckIn 
+    WHERE student_id = %s 
+    AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+""", (user['student_id'],), one=True)
     
     current_avg = float(stat['avg_mood']) if stat and stat['avg_mood'] else 0
     percentage = int((current_avg / 5) * 100)
 
-    # Flash message now includes the percentage
+    # Flash message includes the percentage 
     msg = f"Mood logged! Your Mental Wellness Score is currently {percentage}%."
     if percentage < 30:
-        msg += " (Alert: Your score is critical. A counselor may reach out.)"
+        msg += " (Alert: Your score currently is critical. A counselor may reach out.)"
         
     flash(msg)
     return redirect('/dashboard')
@@ -886,7 +908,7 @@ def mood_checkin():
 def submit_appeal():
     user = get_user_by_id(session['user_id'])
     execute_db("INSERT INTO Appeal (student_id, reason) VALUES (%s, %s)", (user['student_id'], request.form['reason']))
-    flash("Appeal submitted to Admin.")
+    flash("Your appeal submitted to Admin.")
     return redirect('/dashboard')
 
 # --- FORUM FEATURES ---
@@ -896,7 +918,7 @@ def forum():
     if not user: return redirect('/logout')
 
     if request.method == 'POST':
-        # ... (This part handles posting, it is fine) ...
+        #  handle the forum posting
         if user['score'] < 60:
             flash("Restricted users cannot post.")
             return redirect('/forum')
@@ -917,13 +939,13 @@ def forum():
             if file and file.filename != '':
                 try:
                     # Upload directly to Cloudinary
-                    # resource_type="auto" allows Videos, Music, and Documents (Excel/PDF)
+                    # resource_type="auto" allows Videos, Music, and Documents (Excel)
                     upload_result = cloudinary.uploader.upload(file, resource_type="auto", public_id=file.filename)
                     # Get the secure URL (starts with https://)
                     file_urls.append(upload_result['secure_url'])
                 except Exception as e:
                     print(f"Upload Error: {e}")
-                    flash("Error uploading one of the files.")
+                    flash("Error uploading one of the files. Only png, jpg, jpeg, gif, mp4, mp3, mov, mpeg, mpg, doc, docx, pptx, xls, xlsx files accepted.")
         
         # Join URLs with a comma to store in DB
         image_url_str = ",".join(file_urls)
@@ -946,13 +968,13 @@ def forum():
     """
     raw_posts = query_db(sql)
     
-    # 1. Safety Check: If DB fails, prevent crash
+    # Safety Check: If DB fails, prevent crash
     if raw_posts is None:
         raw_posts = []
 
     posts_ui = []
     
-    # 2. Process Posts (The Loop)
+    # Process Posts
     for p in raw_posts:
         author = "Anonymous" if p['is_anonymous'] else p['full_name']
 
@@ -971,8 +993,6 @@ def forum():
             'comments_count': p['comment_count']
         })
 
-    # 3. HTML Content (CRITICAL: THIS MUST BE OUTSIDE THE LOOP)
-    # Notice how 'content' starts all the way to the left, aligned with 'posts_ui = []'
     content = """
         <div style="max-width:600px; margin:0 auto;">
             <div class="card">
@@ -1019,12 +1039,12 @@ def forum():
                             {% else %}
                                 <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
                                     <span style="font-size:1.2rem;">
-                                        {% if ext == 'pdf' %}📕{% elif ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
+                                        {% if ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
                                     </span>
                                     <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
                                         <strong>{{ file_path.split('/')[-1] }}</strong>
                                     </div>
-                                    <a href="{{ file_path.replace('/upload/', '/upload/fl_attachment/') if (ext == 'pdf' and '/image/upload/' in file_path) else file_path }}" download target="_blank" style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;"> {{ 'Download' if ext == 'pdf' else 'Download' }} </a>
+                                    <a href="{{ file_path.replace('/upload/', '/upload/fl_attachment/') if (ext == '/image/upload/' in file_path) else file_path }}" download target="_blank" style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;"> </a>
                                 </div>
                             {% endif %}
                         {% endfor %}
@@ -1039,8 +1059,6 @@ def forum():
             {% endfor %}
         </div>
     """
-    
-    # 4. RETURN (CRITICAL: MUST BE OUTSIDE THE LOOP)
     return render_page(content, posts=posts_ui)
 
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
@@ -1060,10 +1078,11 @@ def post_detail(pid):
     if p.get('image_url'):
         p['files'] = [f.strip() for f in p['image_url'].split(',') if f.strip()]
     
+    #anon still get points 
     if request.method == 'POST':
         user = get_user_by_id(session['user_id'])
         content = request.form['content']
-        anon = 1 if 'anon' in request.form else 0
+        anon = 1 if 'anon' in request.form else 0 #check tickbox from HTML
         execute_db("INSERT INTO Comment (post_id, student_id, content, is_anonymous) VALUES (%s, %s, %s, %s)", 
                    (pid, user['student_id'], content, anon))
         execute_db("UPDATE Student SET points = LEAST(100, points + %s) WHERE student_id = %s", (CONFIG['points_comment'], user['student_id']))
@@ -1081,8 +1100,7 @@ def post_detail(pid):
         ORDER BY c.created_at ASC
     """, (pid,))
     
-    # --- DELETED THE 'comments_ui' LOOP HERE ---
-    # We will pass 'comments' directly to the template so it has all the IDs and Names.
+    # pass 'comments' directly to the template so it has all the IDs and Names 
 
     content = """
         <a href="/forum">Back to Forum</a>
@@ -1158,19 +1176,19 @@ def like_post(pid):
     student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (user_id,), one=True)
     if not student: return redirect('/logout')
 
-    # 1. Check if already liked (Prevent duplicates)
+    # Check if already liked
     existing = query_db("SELECT * FROM `Like` WHERE student_id = %s AND post_id = %s", 
                         (student['student_id'], pid), one=True)
     
     if not existing:
-        # 2. Insert into Like table
+        # Insert into Like table
         execute_db("INSERT INTO `Like` (student_id, post_id, liked_at) VALUES (%s, %s, NOW())", 
                    (student['student_id'], pid))
         
-        # 3. Update the counter on Post table (for display)
+        # Update the counter on Post table 
         execute_db("UPDATE Post SET likes = likes + 1 WHERE post_id = %s", (pid,))
     else:
-        # Optional: Unlike (Toggle)
+        # Toggle to Unlike 
         execute_db("DELETE FROM `Like` WHERE like_id = %s", (existing['like_id'],))
         execute_db("UPDATE Post SET likes = likes - 1 WHERE post_id = %s", (pid,))
 
@@ -1199,7 +1217,7 @@ def like_comment(cid):
     
     return redirect(request.referrer)
 
-# --- REPORT SUBMISSION (Handles both Posts and Comments) ---
+# --- REPORT SUBMISSION ---
 @app.route('/submit_report', methods=['POST'])
 def submit_report():
     target_type = request.form['type'] # 'post' or 'comment'
@@ -1212,7 +1230,7 @@ def submit_report():
     flash("Report submitted.")
     return redirect(request.referrer)
 
-# --- MATCH UP (Tinder Style) ---
+# --- MATCH UP ---
 @app.route('/match')
 def match_up():
     user = get_user_by_id(session.get('user_id'))
@@ -1234,7 +1252,7 @@ def match_up():
         their_interests = set(s['interests'].split(',')) if s['interests'] else set()
         common = my_interests & their_interests
         
-        # LOGIC CHANGE: Show if common interests exist OR if I have no interests yet
+        # Show if common interests exist OR if I have no interests yet
         if common or not my_interests:
             s['interests_list'] = list(their_interests)
             candidates.append(s)
@@ -1381,7 +1399,7 @@ def profile():
     if request.method == 'POST':
         bio = request.form['bio']
         prog = request.form['program']
-        interests = request.form['interests'] # New Field
+        interests = request.form['interests'] 
         
         # Update SQL
         execute_db("UPDATE Student SET bio = %s, program = %s, interests = %s WHERE student_id = %s", 
@@ -1400,7 +1418,7 @@ def profile():
     my_posts = []
     for p in my_posts_raw:
         my_posts.append({
-            'id': p['post_id'],  # <--- THIS WAS MISSING! ADD THIS LINE.
+            'id': p['post_id'], 
             'content': p['content'], 
             'likes': p['likes'], 
             'is_retweet': p['is_retweet'],
@@ -1597,7 +1615,7 @@ def book_appointment():
                         <option value="{{ t }}">{{ t }}</option>
                     {% endfor %}
                 </select>
-                <small style="color:var(--sub); display:block; margin-bottom:10px;">Note: If a slot is actually taken, the system will alert you.</small>
+                <small style="color:var(--sub); display:block; margin-bottom:10px;">Note: If a slot is actually taken, the system will alert you when you submit the booking appointment.</small>
 
                 <label>Reason</label>
                 <textarea name="reason" placeholder="Briefly describe your concern..." required></textarea>
@@ -1608,7 +1626,7 @@ def book_appointment():
     return render_page(content, counselors=counselors, slots=time_slots, now=datetime.now().strftime('%Y-%m-%d'))
 
 # ==========================================
-# 6. ADMIN FEATURES 
+# ADMIN FEATURES 
 # ==========================================
 def admin_dashboard():
     # --- 1. METRICS DATA ---
@@ -1659,7 +1677,7 @@ def admin_dashboard():
             AVG(m.mood_level) as avg_mood,
             COUNT(m.checkin_id) as total_logs,
             MAX(m.checkin_date) as last_checkin,
-            (AVG(m.mood_level) / 5) * 100 as wellness_percentage
+            (AVG(m.mood_level) / 7) * 100 as wellness_percentage
         FROM MoodCheckIn m
         JOIN Student s ON m.student_id = s.student_id
         GROUP BY s.student_id
@@ -1687,7 +1705,7 @@ def admin_dashboard():
         ORDER BY ca.appointment_date ASC
     """)
 
-# --- 5. MODERATION & FLAGS (UPDATED) ---
+# --- 5. MODERATION & FLAGS ---
     
     # 1. Fetch BOTH Pending and Escalated reports
     reports = query_db("SELECT * FROM Report WHERE status IN ('Pending', 'Escalated') ORDER BY created_at ASC")
@@ -1712,7 +1730,7 @@ def admin_dashboard():
                 r['reported_user_id'] = c['student_id']
                 r['reported_user_name'] = c['full_name']
 
-        # B. Get Reporter Name (MOVED INSIDE LOOP TO FIX ERROR)
+        # B. Get Reporter Name 
         reporter = query_db("SELECT username FROM Account WHERE account_id=%s", (r['reporter_id'],), one=True)
         r['reporter_name'] = reporter['username'] if reporter else "Unknown"
 
@@ -1899,7 +1917,7 @@ def admin_dashboard():
     </div>
 
     <script>
-    // --- ADD THIS MISSING FUNCTION ---
+    
     function openModModal(id, name, reason, type, sid) {
         document.getElementById('mod-action-modal').style.display = 'block';
         document.getElementById('mod-report-id').value = id;
@@ -1908,7 +1926,6 @@ def admin_dashboard():
         document.getElementById('mod-target-type').value = type;
         document.getElementById('mod-student-id').value = sid;
     }
-    // ----------------------------------
 
     function openSuspendModal(id, name, score, vio) {
         document.getElementById('suspend-modal').style.display = 'block';
@@ -2187,14 +2204,14 @@ def admin_dashboard():
         now=datetime.now().strftime("%Y-%m-%d")
     )
 
-# ==========================================
-# NEW ROUTES FOR ADMIN FEATURES (UC3 - UC8)
-# ==========================================
+# ===============================
+# ADMIN FEATURES 
+# ===============================
 
 @app.route('/admin/assign_counselor', methods=['POST'])
 def assign_counselor_logic():
     sid = int(request.form['student_id'])
-    cid = int(request.form['counselor_id']) # This now comes from the Dropdown
+    cid = int(request.form['counselor_id']) # comes from the Dropdown
     
     execute_db("INSERT INTO Assignment (student_id, counselor_id, status) VALUES (%s, %s, 'Pending')", (sid, cid))
     
@@ -2224,8 +2241,8 @@ def suspend_user():
     add_notification(student['account_id'], msg)
     
     # 4. Remove from restricted list (Technically handled by UI logic, but we can set score to -1 to hide from restricted view if needed, or leave as is)
-    
     flash(f"User {student['full_name']} suspended for {duration} days. Login blocked.")
+
     return redirect('/dashboard')
 
 @app.route('/admin/process_appeal', methods=['POST'])
@@ -2316,7 +2333,7 @@ def resolve_report_action():
 
 # 3. APPLY PENALTY & CHECK THRESHOLD
     if sid and sid != 'None':
-        # FIX: Deduct points from BOTH Score (Safety) AND Points (Gamification/XP)
+        # FIX: Deduct points from BOTH Score (Safety) AND Points (Gamification)
         execute_db("""
             UPDATE Student 
             SET score_percentage = GREATEST(0, score_percentage - %s), 
@@ -2373,7 +2390,7 @@ def update_scoring_config():
     return redirect('/dashboard')
 
 # ==========================================
-# 7. COUNSELOR FEATURES
+# COUNSELOR FEATURES
 # ==========================================
 
 def counselor_dashboard():
@@ -2765,7 +2782,7 @@ def export_data():
     return output
 
 # ==========================================
-# 8. MODERATOR FEATURES
+# MODERATOR FEATURES
 # ==========================================
 
 def moderator_dashboard():
@@ -2802,10 +2819,10 @@ def moderator_dashboard():
     </div>
 
     <div style="display:flex; gap:20px; border-bottom:1px solid #ddd; margin-bottom:20px;">
-        <div class="tab-item tab-active" onclick="openTab('reports', this)">🚩 Report Center (UC26)</div>
-        <div class="tab-item" onclick="openTab('students', this)">🎓 Student Oversight (UC27)</div>
-        <div class="tab-item" onclick="openTab('content', this)">🗑️ Content Manager (UC29/30)</div>
-        <div class="tab-item" onclick="openTab('announcements', this)">📢 Announcements (UC28)</div>
+        <div class="tab-item tab-active" onclick="openTab('reports', this)">🚩 Report Center</div>
+        <div class="tab-item" onclick="openTab('students', this)">🎓 Student Oversight</div>
+        <div class="tab-item" onclick="openTab('content', this)">🗑️ Content Manager</div>
+        <div class="tab-item" onclick="openTab('announcements', this)">📢 Announcements</div>
     </div>
 
     <div id="view-reports" class="tab-content">
@@ -2966,10 +2983,6 @@ def mod_make_announcement():
     execute_db("INSERT INTO Announcement (title, content) VALUES (%s, %s)", (request.form['title'], request.form['content']))
     flash("Announcement Posted!")
     return redirect('/dashboard')
-
-# ==========================================
-# 9. NEW MODERATOR LOGIC (Add this to your code)
-# ==========================================
 
 @app.route('/mod/review_decision/<int:rid>/<decision>', methods=['POST'])
 def mod_review_decision(rid, decision):
