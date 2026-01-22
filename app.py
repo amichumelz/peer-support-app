@@ -291,6 +291,16 @@ STYLES = """
         }
 
     /* Nav */
+
+    .nav-inner {
+        max-width: 900px; 
+        margin: 0 auto; 
+        padding: 15px 20px; 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center;
+    }
+    
     .nav { background: rgba(255,255,255,0.95); padding: 15px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(10px); z-index: 100; }
     .nav-brand { font-weight: 800; font-size: 1.3rem; color: var(--blue); }
     .nav-links { display: flex; gap: 25px; }
