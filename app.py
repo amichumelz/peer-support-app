@@ -861,44 +861,46 @@ def student_dashboard(user):
 def mood_checkin():
     user = get_user_by_id(session['user_id'])
 
-    # Daily Check Logic: check if a record exists for this student where the date is TODAY
+    # 1. Check if already checked in today
     already_checked_in = query_db("""
         SELECT checkin_id FROM MoodCheckIn 
         WHERE student_id = %s AND DATE(checkin_date) = CURDATE()
     """, (user['student_id'],), one=True)
 
     if already_checked_in:
-        flash("Mood today had already been checked in. Please try again tomorrow.")
+        flash("You have already checked in today. Please try again tomorrow.")
         return redirect('/dashboard')
    
     lvl = int(request.form.get('level', 3))
     
-    # Logic: 1 or 2 is Critical, else Low severity for individual logs
+    # Logic: 1 or 2 is Critical, else Low severity
     severity = 'Critical' if lvl <= 2 else 'Low'
     
-    # 1. Insert the new Mood Entry
-    execute_db("INSERT INTO MoodCheckIn (student_id, mood_level, severity_level, note) VALUES (%s, %s, %s, 'User check-in')", (user['student_id'], lvl, severity))
+    # 2. Insert the new Mood Entry
+    # Note: We rely on the database to auto-fill 'checkin_date' with the current timestamp
+    execute_db("INSERT INTO MoodCheckIn (student_id, mood_level, severity_level, note) VALUES (%s, %s, %s, 'User check-in')", 
+               (user['student_id'], lvl, severity))
     
-    # 2. Update Points
+    # 3. Update Points
     new_points = min(100, user['points'] + CONFIG['points_checkin'])
     execute_db("UPDATE Student SET points = %s WHERE student_id = %s", (new_points, user['student_id']))
     
-    # 3. Calculate Overall Mood Percentage (Average of all logs in 14 days)
-    # Formula: (Average Level / 5) * 100
+    # 4. Calculate Overall Mood Percentage (Average of last 14 days)
+    # FIX: Changed 'created_at' to 'checkin_date' here
     stat = query_db("""
-    SELECT AVG(mood_level) as avg_mood 
-    FROM MoodCheckIn 
-    WHERE student_id = %s 
-    AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
-""", (user['student_id'],), one=True)
+        SELECT AVG(mood_level) as avg_mood 
+        FROM MoodCheckIn 
+        WHERE student_id = %s 
+        AND checkin_date >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+    """, (user['student_id'],), one=True)
     
     current_avg = float(stat['avg_mood']) if stat and stat['avg_mood'] else 0
     percentage = int((current_avg / 5) * 100)
 
-    # Flash message includes the percentage 
+    # Flash message
     msg = f"Mood logged! Your Mental Wellness Score is currently {percentage}%."
     if percentage < 30:
-        msg += " (Alert: Your score currently is critical. A counselor may reach out.)"
+        msg += " (Alert: Your score is critical. A counselor may reach out.)"
         
     flash(msg)
     return redirect('/dashboard')
