@@ -15,7 +15,6 @@ import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
 
-# ------------------------------------------------------
 # initialize Flask application
 app = Flask(__name__)
 app.secret_key = 'digital_peer_support_secret'
@@ -45,7 +44,7 @@ cloudinary.config(
 SMTP_SERVER = "smtp.gmail.com"  # Google's SMTP server
 SMTP_PORT = 587                 # TLS Port
 SENDER_EMAIL = "fatinshamirah212@gmail.com" 
-SENDER_PASSWORD = "vwowfvevwnjonkcu" # App Pass 
+SENDER_PASSWORD = "iqlmhvdbupcedxji" # App Pass 
 
 # ==========================================
 # UPDATED CONFIG & HELPERS
@@ -600,10 +599,11 @@ def login():
 
 @app.route('/logout')
 def logout():
-
+    # --- NEW: LOG LOGOUT SESSION TO DB ---
     uid = session.get('user_id')
     if uid:
         execute_db("INSERT INTO LogoutSession (account_id, logout_time) VALUES (%s, NOW())", (uid,))
+    # -------------------------------------
 
     session.clear()
     return redirect('/')
@@ -621,7 +621,7 @@ def forgot_password():
             <h2>Reset Password</h2>
             <p style="color:var(--sub); margin-bottom:20px;">Enter your email to receive a One-Time Password (OTP).</p>
             <form action="/send_reset_otp" method="POST">
-                <input type="email" name="email" placeholder="Student Email" required>
+                <input type="email" name="email" placeholder="Registered Email" required>
                 <button class="btn" style="width:100%">Send OTP</button>
             </form>
             <a href="/" style="display:block; margin-top:15px; text-align:center;">Back to Login</a>
@@ -639,7 +639,7 @@ def send_reset_otp():
     
     if not account:
         # Security: Don't reveal if email exists or not
-        flash("If that email exists, we have sent an OTP.")
+        flash("Email not exist! ")
         return redirect('/forgot_password')
 
     # 2. Generate 4-digit OTP
@@ -660,7 +660,7 @@ def send_reset_otp():
         body = f"""
         <html>
           <body>
-            <h2>Password Reset Request</h2>
+            <h2>Peer Support System: Password Reset Request</h2>
             <p>Your One-Time Password (OTP) is:</p>
             <h1 style="color: #1d9bf0; letter-spacing: 5px;">{otp}</h1>
             <p>This code expires when you close your browser session.</p>
@@ -677,12 +677,12 @@ def send_reset_otp():
         server.send_message(msg)
         server.quit()
 
-        flash(f"✅ OTP sent to {email}. Please check your inbox.")
+        flash(f"OTP sent to {email}. Please check your inbox.")
         return redirect('/enter_otp')
 
     except Exception as e:
         print(f"Email Error: {e}")
-        flash("❌ Failed to send email. Check server logs or internet connection.")
+        flash("Failed to send email. Check server logs or internet connection.")
         return redirect('/forgot_password')
     
 # STEP 5: Enter OTP Page
@@ -713,11 +713,11 @@ def verify_otp_action():
     system_otp = session.get('reset_otp')
     
     if user_otp == system_otp:
-        # OTP Matches! Mark session as verified
+        # OTP Matches. Mark session as verified
         session['otp_verified'] = True
         return redirect('/reset_new_password')
     else:
-        flash("❌ Invalid OTP. Please try again.")
+        flash("Invalid OTP. Please try again.")
         return redirect('/enter_otp')
 
 # STEP 7: Set New Password Page
@@ -758,7 +758,7 @@ def perform_password_reset():
     
     # 1. Check Matching
     if password != confirm:
-        flash("Passwords do not match.")
+        flash("The password does not match.")
         return redirect('/reset_new_password')
         
     # 2. Check Complexity (Same logic as Signup)
@@ -1246,6 +1246,11 @@ def like_post(pid):
 
         # --- NEW: GIVE POINTS FOR LIKING ---
         update_student_score(student['student_id'], CONFIG['points_like'], "Liked a Post")
+    else:
+        # Toggle to Unlike 
+        execute_db("DELETE FROM `Like` WHERE like_id = %s", (existing['like_id'],))
+        execute_db("UPDATE Post SET likes = likes - 1 WHERE post_id = %s", (pid,))
+
     return redirect(request.referrer)
 
 # --- LIKE COMMENT (Using the Like Table) ---
@@ -1805,8 +1810,10 @@ def admin_dashboard():
     # 3. Sort: Escalated (Critical) First
     reports.sort(key=lambda x: 0 if x.get('status') == 'Escalated' else 1)
 
+    # ... (Flags logic follows this) ...
     flags = query_db("SELECT f.*, s.full_name as s_name, s.score_percentage as s_score FROM FlagAccount f JOIN Student s ON f.student_id=s.student_id WHERE f.status='Pending'")
 
+    # --- SCORING TAB DATA PREP ---
     # Fetch restricted users with their active appeals and violation history
     restricted_users = query_db("""
         SELECT s.*, a.username 
