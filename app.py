@@ -613,6 +613,23 @@ def logout():
 # ==========================================
 
 # STEP 1 & 2: Click Forgot Password & Enter Email
+@app.route('/forgot_password')
+def forgot_password():
+    html = """
+    <div style="max-width:400px; margin:80px auto;">
+        <div class="card">
+            <h2>Reset Password</h2>
+            <p style="color:var(--sub); margin-bottom:20px;">Enter your email to receive a One-Time Password (OTP).</p>
+            <form action="/send_reset_otp" method="POST">
+                <input type="email" name="email" placeholder="Student Email" required>
+                <button class="btn" style="width:100%">Send OTP</button>
+            </form>
+            <a href="/" style="display:block; margin-top:15px; text-align:center;">Back to Login</a>
+        </div>
+    </div>
+    """
+    return render_page(html)
+
 @app.route('/send_reset_otp', methods=['POST'])
 def send_reset_otp():
     email = request.form['email']
@@ -621,28 +638,20 @@ def send_reset_otp():
     account = query_db("SELECT * FROM Account WHERE email = %s", (email,), one=True)
     
     if not account:
-        flash("Email does not exist!")
+        # Security: Don't reveal if email exists or not
+        flash("If that email exists, we have sent an OTP.")
         return redirect('/forgot_password')
 
     # 2. Generate 4-digit OTP
     otp = str(random.randint(1000, 9999))
     
-    # 3. Store in Session (For immediate verification)
+    # 3. Store in Session
     session['reset_email'] = email
     session['reset_otp'] = otp
     
-    # 4. LOG TO DATABASE (This fixes your empty table issue!)
-    # We need to find the student_id associated with this account
-    student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (account['account_id'],), one=True)
-    
-    if student:
-        execute_db("""
-            INSERT INTO PasswordReset (student_id, otp_code, requested_at, expires_at, is_used) 
-            VALUES (%s, %s, NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 0)
-        """, (student['student_id'], otp))
-    
-    # 5. SEND ACTUAL EMAIL (Standard Method)
+    # 4. SEND ACTUAL EMAIL
     try:
+        # Create the email message
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = email
@@ -651,7 +660,7 @@ def send_reset_otp():
         body = f"""
         <html>
           <body>
-            <h2>Peer Support System: Password Reset Request</h2>
+            <h2>Password Reset Request</h2>
             <p>Your One-Time Password (OTP) is:</p>
             <h1 style="color: #1d9bf0; letter-spacing: 5px;">{otp}</h1>
             <p>This code expires when you close your browser session.</p>
@@ -661,22 +670,21 @@ def send_reset_otp():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Standard connection - no special timeouts or hacks
+        # Connect to Server and Send
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls() 
+        server.starttls() # Secure the connection
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
 
-        flash(f"OTP sent to {email}. Please check your inbox.")
+        flash(f"✅ OTP sent to {email}. Please check your inbox.")
         return redirect('/enter_otp')
 
     except Exception as e:
         print(f"Email Error: {e}")
-        # Show the actual error on screen so you know if it's Password or Network
-        flash(f"Failed to send email: {e}")
+        flash("❌ Failed to send email. Check server logs or internet connection.")
         return redirect('/forgot_password')
-                
+    
 # STEP 5: Enter OTP Page
 @app.route('/enter_otp')
 def enter_otp():
@@ -705,11 +713,11 @@ def verify_otp_action():
     system_otp = session.get('reset_otp')
     
     if user_otp == system_otp:
-        # OTP Matches. Mark session as verified
+        # OTP Matches! Mark session as verified
         session['otp_verified'] = True
         return redirect('/reset_new_password')
     else:
-        flash("Invalid OTP. Please try again.")
+        flash("❌ Invalid OTP. Please try again.")
         return redirect('/enter_otp')
 
 # STEP 7: Set New Password Page
@@ -750,7 +758,7 @@ def perform_password_reset():
     
     # 1. Check Matching
     if password != confirm:
-        flash("The password does not match.")
+        flash("Passwords do not match.")
         return redirect('/reset_new_password')
         
     # 2. Check Complexity (Same logic as Signup)
@@ -763,18 +771,6 @@ def perform_password_reset():
     # 3. Update Database
     execute_db("UPDATE Account SET password = %s WHERE email = %s", (password, email))
     
-    acct = query_db("SELECT account_id FROM Account WHERE email = %s", (email,), one=True)
-    if acct:
-        stu = query_db("SELECT student_id FROM Student WHERE account_id = %s", (acct['account_id'],), one=True)
-        if stu:
-            # Mark the most recent reset request as used
-            execute_db("""
-                UPDATE PasswordReset 
-                SET is_used = 1 
-                WHERE student_id = %s AND is_used = 0 
-                ORDER BY requested_at DESC LIMIT 1
-            """, (stu['student_id'],))
-            
     # 4. Clear Session cleanup
     session.pop('reset_email', None)
     session.pop('reset_otp', None)
