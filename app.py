@@ -684,6 +684,16 @@ def send_reset_otp():
         server.send_message(msg)
         server.quit()
 
+        # Use SMTP_SSL and Port 465. 
+        # Do NOT use server.starttls() with this method.
+        SMTP_SSL_PORT = 465
+        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_SSL_PORT, timeout=20)
+        
+        # Login and Send
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+
         flash(f"OTP sent to {email}. Please check your inbox.")
         return redirect('/enter_otp')
 
