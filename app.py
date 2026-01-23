@@ -637,7 +637,7 @@ def send_reset_otp():
     account = query_db("SELECT * FROM Account WHERE email = %s", (email,), one=True)
     
     if not account:
-        flash("Email not exist! ")
+        flash("Email does not exist!")
         return redirect('/forgot_password')
 
     # 2. Generate 4-digit OTP
@@ -647,19 +647,17 @@ def send_reset_otp():
     session['reset_email'] = email
     session['reset_otp'] = otp
     
-    # --- NEW: LOG TO DATABASE (PasswordReset Table) ---
-    # We need to find the student_id associated with this account (if exists)
+    # 4. LOG TO DATABASE (PasswordReset Table)
+    # We need to find the student_id associated with this account
     student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (account['account_id'],), one=True)
     
     if student:
-        # It's a student, log the reset request
         execute_db("""
             INSERT INTO PasswordReset (student_id, otp_code, requested_at, expires_at, is_used) 
             VALUES (%s, %s, NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 0)
         """, (student['student_id'], otp))
-    # --------------------------------------------------
     
-    # 4. SEND ACTUAL EMAIL
+    # 5. SEND ACTUAL EMAIL (With Error Handling)
     try:
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
@@ -679,7 +677,8 @@ def send_reset_otp():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        # ADDED TIMEOUT (10 seconds) to prevent server crash
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
         server.starttls() 
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
@@ -690,9 +689,9 @@ def send_reset_otp():
 
     except Exception as e:
         print(f"Email Error: {e}")
-        flash("Failed to send email. Check server logs or internet connection.")
+        flash("Failed to send email. Check internet connection or App Password.")
         return redirect('/forgot_password')
-        
+            
 # STEP 5: Enter OTP Page
 @app.route('/enter_otp')
 def enter_otp():
