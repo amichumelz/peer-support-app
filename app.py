@@ -44,7 +44,7 @@ cloudinary.config(
 SMTP_SERVER = "smtp.gmail.com"  # Google's SMTP server
 SMTP_PORT = 587                 # TLS Port
 SENDER_EMAIL = "fatinshamirah212@gmail.com" 
-SENDER_PASSWORD = "iqlmhvdbupcedxji" # App Pass 
+SENDER_PASSWORD = "vwowfvevwnjonkcu" # App Pass 
 
 # ==========================================
 # UPDATED CONFIG & HELPERS
