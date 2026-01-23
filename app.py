@@ -89,12 +89,18 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def update_student_score(student_id, amount, action_type="System Action"):
-
+    """
+    Gamification/Reputation System (points column):
+    - Starts at 100.
+    - Controlled by actions (Post/Comment/Like) and Penalties.
+    - Daily Limit of 10 points for positive actions.
+    - Used for User Restriction logic.
+    """
     conn = get_db_connection()
     if not conn: return
     cursor = conn.cursor(dictionary=True)
     
-    # 1. Get current points
+    # 1. Get current Gamification Points
     cursor.execute("SELECT points FROM Student WHERE student_id = %s", (student_id,))
     res = cursor.fetchone()
     if not res: 
@@ -104,11 +110,11 @@ def update_student_score(student_id, amount, action_type="System Action"):
     current_points = res['points']
     actual_change = amount
     
-    # 2. Check Daily Limit for GAINS (Positive points only)
+    # 2. Check Daily Limit for REWARDS (Positive points only)
     if amount > 0:
         today = datetime.now().strftime('%Y-%m-%d')
         
-        # Calculate how many points were earned TODAY from ScoreTransaction
+        # Sum positive points earned TODAY from ScoreTransaction
         cursor.execute("""
             SELECT SUM(points_change) as daily_total 
             FROM ScoreTransaction 
@@ -120,7 +126,7 @@ def update_student_score(student_id, amount, action_type="System Action"):
         daily_res = cursor.fetchone()
         daily_earned = daily_res['daily_total'] if daily_res and daily_res['daily_total'] else 0
         
-        # For this system, we keep the daily limit at 10  
+        # Hardcoded limit or dynamic config
         DAILY_LIMIT = 10 
         
         if daily_earned >= DAILY_LIMIT:
@@ -129,27 +135,26 @@ def update_student_score(student_id, amount, action_type="System Action"):
         elif daily_earned + amount > DAILY_LIMIT:
             actual_change = DAILY_LIMIT - daily_earned
 
-    # 3. Calculate New Score (Clamp between 0 and CONFIG['max_score'])
-    new_score = current_points + actual_change
+    # 3. Calculate New Score (Clamp 0-100)
+    new_points = current_points + actual_change
     
     # Use dynamic Max Score from Config
-    if new_score > CONFIG['max_score']: new_score = CONFIG['max_score']
-    if new_score < 0: new_score = 0
+    if new_points > CONFIG['max_score']: new_points = CONFIG['max_score']
+    if new_points < 0: new_points = 0
 
-    # 4. Update Student Table (Sync points and score_percentage)
-    cursor.execute("UPDATE Student SET points = %s, score_percentage = %s WHERE student_id = %s", 
-                   (new_score, new_score, student_id))
+    # 4. Update ONLY the 'points' column
+    cursor.execute("UPDATE Student SET points = %s WHERE student_id = %s", (new_points, student_id))
     
-    # 5. Log transaction to ScoreTransaction (Only if points changed)
+    # 5. Log transaction to ScoreTransaction
     if actual_change != 0: 
         cursor.execute("""
             INSERT INTO ScoreTransaction (student_id, action_type, points_change, resulting_score) 
             VALUES (%s, %s, %s, %s)
-        """, (student_id, action_type, actual_change, new_score))
+        """, (student_id, action_type, actual_change, new_points))
 
     conn.commit()
     conn.close()
-    return new_score
+    return new_points
 
 # Template Library (Kept in memory as it's static data)
 PLAN_TEMPLATES = {
@@ -579,14 +584,26 @@ def login():
         if not user['is_active']:
             flash("Account suspended. Contact Admin.")
             return redirect('/')
+            
         session['user_id'] = user['account_id']
         session['role'] = user['role']
+
+        # --- NEW: LOG LOGIN SESSION TO DB ---
+        execute_db("INSERT INTO LoginSession (account_id, login_time, is_active) VALUES (%s, NOW(), 1)", 
+                   (user['account_id'],))
+        # ------------------------------------
+
         return redirect('/dashboard')
     flash("Invalid credentials")
     return redirect('/')
 
 @app.route('/logout')
 def logout():
+
+    uid = session.get('user_id')
+    if uid:
+        execute_db("INSERT INTO LogoutSession (account_id, logout_time) VALUES (%s, NOW())", (uid,))
+
     session.clear()
     return redirect('/')
 
@@ -620,20 +637,30 @@ def send_reset_otp():
     account = query_db("SELECT * FROM Account WHERE email = %s", (email,), one=True)
     
     if not account:
-        # Security: Don't reveal if email exists or not
         flash("Email not exist! ")
         return redirect('/forgot_password')
 
     # 2. Generate 4-digit OTP
     otp = str(random.randint(1000, 9999))
     
-    # 3. Store in Session
+    # 3. Store in Session (For immediate verification)
     session['reset_email'] = email
     session['reset_otp'] = otp
     
+    # --- NEW: LOG TO DATABASE (PasswordReset Table) ---
+    # We need to find the student_id associated with this account (if exists)
+    student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (account['account_id'],), one=True)
+    
+    if student:
+        # It's a student, log the reset request
+        execute_db("""
+            INSERT INTO PasswordReset (student_id, otp_code, requested_at, expires_at, is_used) 
+            VALUES (%s, %s, NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 0)
+        """, (student['student_id'], otp))
+    # --------------------------------------------------
+    
     # 4. SEND ACTUAL EMAIL
     try:
-        # Create the email message
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = email
@@ -652,9 +679,8 @@ def send_reset_otp():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # Connect to Server and Send
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls() # Secure the connection
+        server.starttls() 
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
@@ -666,7 +692,7 @@ def send_reset_otp():
         print(f"Email Error: {e}")
         flash("Failed to send email. Check server logs or internet connection.")
         return redirect('/forgot_password')
-    
+        
 # STEP 5: Enter OTP Page
 @app.route('/enter_otp')
 def enter_otp():
@@ -753,6 +779,18 @@ def perform_password_reset():
     # 3. Update Database
     execute_db("UPDATE Account SET password = %s WHERE email = %s", (password, email))
     
+    acct = query_db("SELECT account_id FROM Account WHERE email = %s", (email,), one=True)
+    if acct:
+        stu = query_db("SELECT student_id FROM Student WHERE account_id = %s", (acct['account_id'],), one=True)
+        if stu:
+            # Mark the most recent reset request as used
+            execute_db("""
+                UPDATE PasswordReset 
+                SET is_used = 1 
+                WHERE student_id = %s AND is_used = 0 
+                ORDER BY requested_at DESC LIMIT 1
+            """, (stu['student_id'],))
+            
     # 4. Clear Session cleanup
     session.pop('reset_email', None)
     session.pop('reset_otp', None)
@@ -797,7 +835,7 @@ def dashboard():
 # ==========================================
 
 def student_dashboard(user):
-    user['is_restricted'] = user['score'] < CONFIG['restriction_threshold']
+    user['is_restricted'] = user['points'] < CONFIG['restriction_threshold']
     
     # 1. Fetch Announcements
     anns = query_db("SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date_str FROM Announcement ORDER BY date DESC LIMIT 3")
@@ -904,41 +942,39 @@ def mood_checkin():
         return redirect('/dashboard')
    
     lvl = int(request.form.get('level', 3))
-    
-    # Logic: 1 or 2 is Critical
     severity = 'Critical' if lvl <= 2 else 'Low'
     
     # 2. Insert the new Mood Entry
     execute_db("INSERT INTO MoodCheckIn (student_id, mood_level, severity_level, note) VALUES (%s, %s, %s, 'User check-in')", 
                (user['student_id'], lvl, severity))
     
-    # 3. CALCULATE WELLNESS BATTERY (Start 100%, Deduct/Add based on history)
-    # Fetch all logs for this student ordered by time
+    # 3. UPDATE GAMIFICATION POINTS (Using the Helper)
+    # This adds to 'points' with daily limit check
+    update_student_score(user['student_id'], CONFIG['points_checkin'], "Mood Check-in")
+    
+    # 4. CALCULATE WELLNESS BATTERY (For 'score_percentage')
     history = query_db("SELECT mood_level FROM MoodCheckIn WHERE student_id = %s ORDER BY checkin_date ASC", (user['student_id'],))
     
-    current_battery = 100 # Everyone starts at 100%
+    wellness_battery = 100 # Starts at 100%
     
     if history:
         for log in history:
             m = log['mood_level']
-            if m == 1:   # 😫 1/5: Deduct 20%
-                current_battery -= 20
-            elif m == 2: # 😔 2/5: Deduct 10%
-                current_battery -= 10
-            elif m == 3: # 😐 3/5: Neutral (No change or small drain?) let's say -5 to encourage activity
-                current_battery -= 5
-            elif m == 4: # 🙂 4/5: Recharge 5%
-                current_battery += 5
-            elif m == 5: # 😄 5/5: Recharge 15%
-                current_battery += 15
+            if m == 1: wellness_battery -= 20
+            elif m == 2: wellness_battery -= 10
+            elif m == 3: wellness_battery -= 5
+            elif m == 4: wellness_battery += 5
+            elif m == 5: wellness_battery += 15
             
             # Clamp between 0 and 100
-            if current_battery > 100: current_battery = 100
-            if current_battery < 0: current_battery = 0
+            if wellness_battery > 100: wellness_battery = 100
+            if wellness_battery < 0: wellness_battery = 0
 
-    # Flash message
-    msg = f"Mood logged! Your Mental Wellness Battery is at {current_battery}%."
-    if current_battery < 30:
+    # 5. UPDATE SCORE_PERCENTAGE (This column is now EXCLUSIVELY for Wellness)
+    execute_db("UPDATE Student SET score_percentage = %s WHERE student_id = %s", (wellness_battery, user['student_id']))
+
+    msg = f"Mood logged! Your Mental Wellness Battery is at {wellness_battery}%."
+    if wellness_battery < 30:
         msg += " (Alert: Your battery is critical. Consider booking a session.)"
         
     flash(msg)
@@ -1789,16 +1825,14 @@ def admin_dashboard():
     # 3. Sort: Escalated (Critical) First
     reports.sort(key=lambda x: 0 if x.get('status') == 'Escalated' else 1)
 
-    # ... (Flags logic follows this) ...
     flags = query_db("SELECT f.*, s.full_name as s_name, s.score_percentage as s_score FROM FlagAccount f JOIN Student s ON f.student_id=s.student_id WHERE f.status='Pending'")
 
-    # --- SCORING TAB DATA PREP ---
     # Fetch restricted users with their active appeals and violation history
     restricted_users = query_db("""
         SELECT s.*, a.username 
         FROM Student s 
         JOIN Account a ON s.account_id = a.account_id 
-        WHERE s.score_percentage < %s
+        WHERE s.points < %s
     """, (CONFIG['restriction_threshold'],))
 
     for u in restricted_users:
