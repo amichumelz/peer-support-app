@@ -5,7 +5,6 @@ import os
 import random 
 import string 
 import smtplib
-import socket
 import cloudinary
 import cloudinary.uploader
 from email.mime.text import MIMEText
@@ -16,14 +15,6 @@ import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
 
-# --- FORCE IPv4 PATCH (Fixes [Errno 101] on Render) ---
-old_getaddrinfo = socket.getaddrinfo
-def new_getaddrinfo(*args, **kwargs):
-    responses = old_getaddrinfo(*args, **kwargs)
-    # Filter out any IPv6 results (AF_INET6), keep only IPv4 (AF_INET)
-    return [r for r in responses if r[0] == socket.AF_INET]
-
-socket.getaddrinfo = new_getaddrinfo
 # ------------------------------------------------------
 # initialize Flask application
 app = Flask(__name__)
@@ -622,23 +613,6 @@ def logout():
 # ==========================================
 
 # STEP 1 & 2: Click Forgot Password & Enter Email
-@app.route('/forgot_password')
-def forgot_password():
-    html = """
-    <div style="max-width:400px; margin:80px auto;">
-        <div class="card">
-            <h2>Reset Password</h2>
-            <p style="color:var(--sub); margin-bottom:20px;">Enter your email to receive a One-Time Password (OTP).</p>
-            <form action="/send_reset_otp" method="POST">
-                <input type="email" name="email" placeholder="Registered Email" required>
-                <button class="btn" style="width:100%">Send OTP</button>
-            </form>
-            <a href="/" style="display:block; margin-top:15px; text-align:center;">Back to Login</a>
-        </div>
-    </div>
-    """
-    return render_page(html)
-
 @app.route('/send_reset_otp', methods=['POST'])
 def send_reset_otp():
     email = request.form['email']
@@ -657,7 +631,7 @@ def send_reset_otp():
     session['reset_email'] = email
     session['reset_otp'] = otp
     
-    # 4. LOG TO DATABASE (PasswordReset Table)
+    # 4. LOG TO DATABASE (This fixes your empty table issue!)
     # We need to find the student_id associated with this account
     student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (account['account_id'],), one=True)
     
@@ -667,7 +641,7 @@ def send_reset_otp():
             VALUES (%s, %s, NOW(), DATE_ADD(NOW(), INTERVAL 15 MINUTE), 0)
         """, (student['student_id'], otp))
     
-    # 5. SEND ACTUAL EMAIL (With Error Handling)
+    # 5. SEND ACTUAL EMAIL (Standard Method)
     try:
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
@@ -687,8 +661,8 @@ def send_reset_otp():
         """
         msg.attach(MIMEText(body, 'html'))
 
-        # ADDED TIMEOUT (10 seconds) to prevent server crash
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
+        # Standard connection - no special timeouts or hacks
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls() 
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
@@ -699,9 +673,10 @@ def send_reset_otp():
 
     except Exception as e:
         print(f"Email Error: {e}")
-        flash("Failed to send email. Check internet connection or App Password.")
+        # Show the actual error on screen so you know if it's Password or Network
+        flash(f"Failed to send email: {e}")
         return redirect('/forgot_password')
-            
+                
 # STEP 5: Enter OTP Page
 @app.route('/enter_otp')
 def enter_otp():
