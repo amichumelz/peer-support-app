@@ -5,6 +5,7 @@ import os
 import random 
 import string 
 import smtplib
+import socket
 import cloudinary
 import cloudinary.uploader
 from email.mime.text import MIMEText
@@ -15,6 +16,15 @@ import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
 
+# --- FORCE IPv4 PATCH (Fixes [Errno 101] on Render) ---
+old_getaddrinfo = socket.getaddrinfo
+def new_getaddrinfo(*args, **kwargs):
+    responses = old_getaddrinfo(*args, **kwargs)
+    # Filter out any IPv6 results (AF_INET6), keep only IPv4 (AF_INET)
+    return [r for r in responses if r[0] == socket.AF_INET]
+
+socket.getaddrinfo = new_getaddrinfo
+# ------------------------------------------------------
 # initialize Flask application
 app = Flask(__name__)
 app.secret_key = 'digital_peer_support_secret'
@@ -680,16 +690,6 @@ def send_reset_otp():
         # ADDED TIMEOUT (10 seconds) to prevent server crash
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
         server.starttls() 
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-
-        # Use SMTP_SSL and Port 465. 
-        # Do NOT use server.starttls() with this method.
-        SMTP_SSL_PORT = 465
-        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_SSL_PORT, timeout=20)
-        
-        # Login and Send
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
