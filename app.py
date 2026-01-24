@@ -1114,6 +1114,35 @@ def forum():
             </div>
             {% endfor %}
         </div>
+
+        <div id="report-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999;">
+            <div class="card" style="max-width:400px; margin:100px auto;">
+                <h3>Report Content</h3>
+                <form action="/submit_report" method="POST">
+                    <input type="hidden" name="type" id="rep_type"> 
+                    <input type="hidden" name="id" id="rep_id">     
+                    <label>Reason:</label>
+                    <select name="reason" required>
+                        <option value="Harassment">Harassment</option>
+                        <option value="Spam">Spam</option>
+                        <option value="Inappropriate">Inappropriate</option>
+                    </select>
+                    
+                    <div style="margin-top:15px; text-align:right;">
+                        <button type="button" onclick="document.getElementById('report-modal').style.display='none'" class="btn btn-outline">Cancel</button>
+                        <button class="btn btn-red">Submit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+        function openReportModal(type, id) {
+            document.getElementById('report-modal').style.display = 'block';
+            document.getElementById('rep_type').value = type;
+            document.getElementById('rep_id').value = id;
+        }
+        </script>
     """
     return render_page(content, posts=posts_ui)
 

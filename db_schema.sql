@@ -311,18 +311,6 @@ CREATE TABLE CommentDeletion (
     FOREIGN KEY (moderator_id) REFERENCES Moderator(moderator_id)
 );
 
--- 5.5 Counselor Tools
-CREATE TABLE CheckInMessage (
-    message_id INT AUTO_INCREMENT PRIMARY KEY,
-    counselor_id INT NOT NULL,
-    student_id INT NOT NULL,
-    message_content TEXT,
-    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_read BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (counselor_id) REFERENCES Counselor(counselor_id),
-    FOREIGN KEY (student_id) REFERENCES Student(student_id)
-);
-
 CREATE TABLE ExportData (
     export_id INT AUTO_INCREMENT PRIMARY KEY,
     counselor_id INT NOT NULL,
