@@ -450,13 +450,6 @@ BASE_TEMPLATE = """
                 <div style="padding:10px 0; border-bottom:1px solid #f0f0f0;">
                     {{ n.msg }} <span style="color:var(--sub); font-size:0.8rem; margin-left:5px;">{{ n.time }}</span>
                     {% if n.link and '/accept_friend/' in n.link %}
-                        <div style="margin-top: 8px;">
-                            <a href="{{ n.link }}" class="btn btn-green" style="padding: 5px 15px; font-size: 0.8rem; margin-right: 5px;">Accept</a>
-                            <a href="{{ n.link.replace('accept', 'decline') }}" class="btn btn-red" style="padding: 5px 15px; font-size: 0.8rem;">Decline</a>
-                        </div>
-                    {% elif n.link %}
-                        <a href="{{ n.link }}" style="margin-left:10px; font-weight:bold;">View</a> 
-                    {% endif %}
                 </div>
             {% endfor %}
         </div>
