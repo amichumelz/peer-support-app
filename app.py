@@ -449,7 +449,14 @@ BASE_TEMPLATE = """
             {% for n in notifications %}
                 <div style="padding:10px 0; border-bottom:1px solid #f0f0f0;">
                     {{ n.msg }} <span style="color:var(--sub); font-size:0.8rem; margin-left:5px;">{{ n.time }}</span>
-                    {% if n.link %} <a href="{{ n.link }}" style="margin-left:10px; font-weight:bold;">View</a> {% endif %}
+                    {% if n.link and '/accept_friend/' in n.link %}
+                        <div style="margin-top: 8px;">
+                            <a href="{{ n.link }}" class="btn btn-green" style="padding: 5px 15px; font-size: 0.8rem; margin-right: 5px;">Accept</a>
+                            <a href="{{ n.link.replace('accept', 'decline') }}" class="btn btn-red" style="padding: 5px 15px; font-size: 0.8rem;">Decline</a>
+                        </div>
+                    {% elif n.link %}
+                        <a href="{{ n.link }}" style="margin-left:10px; font-weight:bold;">View</a> 
+                    {% endif %}
                 </div>
             {% endfor %}
         </div>
@@ -821,7 +828,6 @@ def student_dashboard(user):
     anns = query_db("SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date_str FROM Announcement ORDER BY date DESC LIMIT 3")
     
     # 2. Fetch Upcoming Confirmed Sessions 
-        # gets any appointment (Student Booked OR Counselor Assigned) that is 'Confirmed' 
     sessions = query_db("""
         SELECT ca.*, c.full_name as counselor_name, 
                DATE_FORMAT(ca.appointment_date, '%W, %d %M %Y at %H:%i') as date_pretty
@@ -832,6 +838,15 @@ def student_dashboard(user):
           AND ca.appointment_date >= NOW()
         ORDER BY ca.appointment_date ASC
     """, (user['student_id'],))
+
+    # --- NEW: FETCH PENDING FRIEND REQUESTS ---
+    friend_requests = query_db("""
+        SELECT f.student_id_1 as requester_id, s.full_name, s.program, s.account_id
+        FROM Friendship f
+        JOIN Student s ON f.student_id_1 = s.student_id
+        WHERE f.student_id_2 = %s AND f.status = 'Pending'
+    """, (user['student_id'],))
+    # ------------------------------------------
 
     content = """
         <div style="display:flex; justify-content:space-between; align-items:end; margin-bottom:20px;">
@@ -857,6 +872,23 @@ def student_dashboard(user):
         {% endif %}
 
         <div class="grid">
+            {% if friend_requests %}
+            <div class="card" style="border-left: 4px solid var(--orange);">
+                <h3>💌 Friend Requests</h3>
+                {% for req in friend_requests %}
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f0f0;">
+                        <div>
+                            <strong>{{ req.full_name }}</strong><br>
+                            <span style="font-size:0.8rem; color:var(--sub);">{{ req.program }}</span>
+                        </div>
+                        <div style="display:flex; gap:5px;">
+                            <a href="/accept_friend/{{ req.account_id }}" class="btn btn-green btn-sm">Accept</a>
+                            <a href="/decline_friend/{{ req.account_id }}" class="btn btn-red btn-sm">Decline</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="card">
                 <h3>Daily Check-in</h3>
                 <p style="color:var(--sub); margin-bottom:15px;">How are you feeling today?</p>
@@ -905,7 +937,7 @@ def student_dashboard(user):
             </div>
         </div>
     """
-    return render_page(content, user=user, announcements=anns, sessions=sessions)
+    return render_page(content, user=user, announcements=anns, sessions=sessions, friend_requests=friend_requests)
 
 @app.route('/mood_checkin', methods=['POST'])
 def mood_checkin():
@@ -1425,6 +1457,24 @@ def accept_friend(rid):
     add_notification(rid, f"{me['name']} accepted your request.")
     flash("Friend added!")
     return redirect('/profile')
+
+@app.route('/decline_friend/<int:rid>') # rid is requester account_id
+def decline_friend(rid):
+    me = get_user_by_id(session['user_id'])
+    requester = get_user_by_id(rid)
+
+    # 1. Update Status to 'Declined' (or you could use DELETE FROM to remove it entirely)
+    execute_db("""
+        UPDATE Friendship 
+        SET status = 'Declined' 
+        WHERE student_id_1 = %s AND student_id_2 = %s
+    """, (requester['student_id'], me['student_id']))
+
+    # 2. Optional: Notify the requester (Often skipped to be polite, but added per your requirements)
+    # add_notification(rid, f"{me['name']} declined your friend request.") 
+
+    flash("Friend request declined.")
+    return redirect('/dashboard')
 
 @app.route('/chat', defaults={'friend_id': None})
 @app.route('/chat/<int:friend_id>', methods=['GET', 'POST'])
