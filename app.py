@@ -243,7 +243,7 @@ def get_user_by_id(account_id):
             })
             # Fetch Friends (Account IDs)
             friends_sql = """
-                SELECT DISTINCT a.account_id  <-- ADD 'DISTINCT' HERE
+                SELECT a.account_id 
                 FROM Friendship f
                 JOIN Student s ON (s.student_id = f.student_id_1 OR s.student_id = f.student_id_2)
                 JOIN Account a ON s.account_id = a.account_id
