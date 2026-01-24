@@ -449,7 +449,6 @@ BASE_TEMPLATE = """
             {% for n in notifications %}
                 <div style="padding:10px 0; border-bottom:1px solid #f0f0f0;">
                     {{ n.msg }} <span style="color:var(--sub); font-size:0.8rem; margin-left:5px;">{{ n.time }}</span>
-                    {% if n.link and '/accept_friend/' in n.link %}
                 </div>
             {% endfor %}
         </div>
