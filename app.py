@@ -242,8 +242,9 @@ def get_user_by_id(account_id):
                 'interests': student['interests'].split(',') if student['interests'] else []
             })
             # Fetch Friends (Account IDs)
+            # Fetch Friends (Account IDs) - Added DISTINCT to prevent duplicates
             friends_sql = """
-                SELECT a.account_id 
+                SELECT DISTINCT a.account_id 
                 FROM Friendship f
                 JOIN Student s ON (s.student_id = f.student_id_1 OR s.student_id = f.student_id_2)
                 JOIN Account a ON s.account_id = a.account_id
@@ -1350,15 +1351,31 @@ def match_up():
 
     skipped_ids = session.get('skipped_matches', [])
     
-    # 1. Get all students except me
+    # 1. NEW: Get IDs of everyone I already have a connection with (Pending OR Accepted)
+    # This prevents users from reappearing if you already sent a request
+    existing_connections = query_db("""
+        SELECT student_id_1, student_id_2 
+        FROM Friendship 
+        WHERE student_id_1 = %s OR student_id_2 = %s
+    """, (user['student_id'], user['student_id']))
+    
+    # Flatten into a set of Student IDs to exclude
+    exclude_ids = set()
+    for row in existing_connections:
+        exclude_ids.add(row['student_id_1'])
+        exclude_ids.add(row['student_id_2'])
+    
+    # 2. Get all students except me
     all_students = query_db("SELECT * FROM Student WHERE student_id != %s", (user['student_id'],))
     
     candidates = []
     my_interests = set(user['interests'])
     
     for s in all_students:
-        # Check if friend (using account_id because user['friends'] stores account_ids)
-        if s['account_id'] in user['friends']: continue
+        # Filter: Exclude anyone in the existing connections list (Friends or Pending)
+        if s['student_id'] in exclude_ids: continue
+        
+        # Filter: Exclude session skips
         if s['account_id'] in skipped_ids: continue
         
         their_interests = set(s['interests'].split(',')) if s['interests'] else set()
@@ -1371,6 +1388,7 @@ def match_up():
     
     match = candidates[0] if candidates else None
     
+    # ... (Keep the rest of your content/HTML exactly the same) ...
     content = """
         <div class="tinder-container">
             <h1 style="text-align:center; margin-bottom:30px;">Find Peers</h1>
@@ -2669,6 +2687,10 @@ def student_details(sid):
     plans = query_db("SELECT * FROM TherapeuticActionPlan WHERE student_id = %s", (sid,))
     templates = PLAN_TEMPLATES
     
+    # --- NEW: Get current time string for the 'min' attribute ---
+    now_str = datetime.now().strftime('%Y-%m-%dT%H:%M')
+    # --------------------------------------------------------
+
     content = """
         <a href="/dashboard">← Back to Dashboard</a>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
@@ -2768,7 +2790,8 @@ def student_details(sid):
                 <h2>Schedule Session</h2>
                 <form action="/counselor_schedule/{{ student.student_id }}" method="POST">
                     <label>Date & Time</label>
-                    <input type="datetime-local" name="date" required>
+                    <input type="datetime-local" name="date" required min="{{ now_str }}">
+                    
                     <label>Duration (Minutes)</label>
                     <select name="duration">
                         <option value="30">30 Minutes</option>
@@ -2802,7 +2825,8 @@ def student_details(sid):
             }
         </script>
     """
-    return render_page(content, student=student, moods=moods, plans=plans, templates=templates)
+    # --- UPDATED: Pass now_str to render_page ---
+    return render_page(content, student=student, moods=moods, plans=plans, templates=templates, now_str=now_str)
 
 @app.route('/create_action_plan/<int:sid>', methods=['POST'])
 def create_action_plan(sid):
@@ -2829,15 +2853,22 @@ def update_plan_status(pid):
 def counselor_schedule(sid):
     c_user = get_user_by_id(session['user_id'])
     cid = c_user['counselor_id']
-    date = request.form['date']
+    date_str = request.form['date']
     
+    # --- NEW: Check if date is in the past ---
+    session_date = datetime.strptime(date_str, '%Y-%m-%dT%H:%M')
+    if session_date < datetime.now():
+        flash("⚠️ Error: Cannot schedule sessions in the past.")
+        return redirect(f'/student_details/{sid}')
+    # ----------------------------------------
+
     execute_db("""
         INSERT INTO CounselorAppointment (student_id, counselor_id, appointment_date, duration, reason, status, notes)
         VALUES (%s, %s, %s, %s, %s, 'Confirmed', 'Scheduled by Counselor')
-    """, (sid, cid, date, request.form['duration'], request.form['reason']))
+    """, (sid, cid, date_str, request.form['duration'], request.form['reason']))
     
     s_acc = query_db("SELECT account_id FROM Student WHERE student_id=%s", (sid,), one=True)
-    add_notification(s_acc['account_id'], f"Counselor scheduled a session with you on {date}.")
+    add_notification(s_acc['account_id'], f"Counselor scheduled a session with you on {date_str}.")
     
     flash("Session scheduled.")
     return redirect(f'/student_details/{sid}')
