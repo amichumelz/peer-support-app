@@ -1984,14 +1984,14 @@ def admin_dashboard():
             ORDER BY r.created_at DESC
         """, (u['student_id'], u['student_id']))
 
-        suspended_users = query_db("""
-            SELECT s.*, a.username, a.is_active,
-            (SELECT reason FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_reason,
-            (SELECT appeal_id FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_id
-            FROM Student s 
-            JOIN Account a ON s.account_id = a.account_id 
-            WHERE a.is_active = 0
-        """)
+    suspended_users = query_db("""
+        SELECT s.*, a.username, a.is_active,
+        (SELECT reason FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_reason,
+        (SELECT appeal_id FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_id
+        FROM Student s 
+        JOIN Account a ON s.account_id = a.account_id 
+        WHERE a.is_active = 0
+    """)
 
     # --- HTML CONTENT ---
     content = """
@@ -2413,6 +2413,7 @@ def admin_dashboard():
         reports=reports,
         flags=flags,
         restricted_users=restricted_users,
+        suspended_users=suspended_users,
         config=CONFIG,
         now=datetime.now().strftime("%Y-%m-%d")
     )
