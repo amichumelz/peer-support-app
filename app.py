@@ -582,8 +582,8 @@ def login():
     
     if user:
         if not user['is_active']:
-            flash("Account suspended. Contact Admin.")
-            return redirect('/')
+            session['temp_suspended_id'] = user['account_id']
+            return redirect('/account_suspended')
             
         session['user_id'] = user['account_id']
         session['role'] = user['role']
@@ -596,6 +596,62 @@ def login():
         return redirect('/dashboard')
     flash("Invalid credentials")
     return redirect('/')
+
+@app.route('/account_suspended')
+def account_suspended():
+    aid = session.get('temp_suspended_id')
+    if not aid: return redirect('/')
+    
+    # Fetch user details to show them why they are suspended
+    user = query_db("""
+        SELECT s.full_name, a.username 
+        FROM Student s JOIN Account a ON s.account_id = a.account_id 
+        WHERE a.account_id = %s
+    """, (aid,), one=True)
+    
+    # Check if they already have a pending appeal
+    student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (aid,), one=True)
+    existing_appeal = query_db("SELECT * FROM Appeal WHERE student_id = %s AND status='Pending'", (student['student_id'],), one=True)
+
+    html = """
+    <div style="max-width:500px; margin:80px auto;">
+        <div class="card" style="border-top: 5px solid var(--red); text-align:center;">
+            <h1 style="color:var(--red);">⛔ Account Suspended</h1>
+            <p>Hi <strong>{{ user.full_name }}</strong>, your account has been suspended due to violations of our community guidelines.</p>
+            
+            {% if existing %}
+                <div class="alert-box" style="margin-top:20px;">
+                    <strong>Appeal Submitted</strong><br>
+                    Your appeal is currently under review by an administrator. Please check back later.
+                </div>
+            {% else %}
+                <p style="margin-top:20px;">If you believe this is a mistake, you may submit an appeal below.</p>
+                <form action="/submit_external_appeal" method="POST" style="text-align:left; margin-top:20px;">
+                    <label>Reason for Appeal / Explanation</label>
+                    <textarea name="reason" rows="4" required placeholder="I apologize for my previous actions..." style="width:100%;"></textarea>
+                    <button class="btn btn-red" style="width:100%;">Submit Appeal</button>
+                </form>
+            {% endif %}
+            
+            <a href="/logout" class="btn btn-outline" style="margin-top:20px; display:inline-block;">Back to Home</a>
+        </div>
+    </div>
+    """
+    return render_page(html, user=user, existing=existing_appeal)
+
+@app.route('/submit_external_appeal', methods=['POST'])
+def submit_external_appeal():
+    aid = session.get('temp_suspended_id')
+    if not aid: return redirect('/')
+    
+    student = query_db("SELECT student_id FROM Student WHERE account_id = %s", (aid,), one=True)
+    reason = request.form['reason']
+    
+    if student:
+        execute_db("INSERT INTO Appeal (student_id, reason) VALUES (%s, %s)", (student['student_id'], reason))
+        flash("Appeal submitted successfully.")
+    
+    return redirect('/account_suspended')
 
 @app.route('/logout')
 def logout():
@@ -1928,6 +1984,15 @@ def admin_dashboard():
             ORDER BY r.created_at DESC
         """, (u['student_id'], u['student_id']))
 
+        suspended_users = query_db("""
+            SELECT s.*, a.username, a.is_active,
+            (SELECT reason FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_reason,
+            (SELECT appeal_id FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_id
+            FROM Student s 
+            JOIN Account a ON s.account_id = a.account_id 
+            WHERE a.is_active = 0
+        """)
+
     # --- HTML CONTENT ---
     content = """
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -2370,6 +2435,27 @@ def assign_counselor_logic():
     add_notification(s_acc['account_id'], f"Counselor assigned to you. Check dashboard.")
     
     flash("Counselor assigned. Waiting for acceptance.")
+    return redirect('/dashboard')
+
+@app.route('/admin/restore_user', methods=['POST'])
+def restore_user():
+    sid = request.form['student_id']
+    appeal_id = request.form.get('appeal_id')
+    
+    # 1. Get Account ID
+    student = query_db("SELECT account_id, full_name FROM Student WHERE student_id=%s", (sid,), one=True)
+    
+    # 2. Reactivate Account
+    execute_db("UPDATE Account SET is_active = 1 WHERE account_id=%s", (student['account_id'],))
+    
+    # 3. If there was a pending appeal, mark it as approved
+    if appeal_id:
+        execute_db("UPDATE Appeal SET status='Approved' WHERE appeal_id=%s", (appeal_id,))
+        
+    # 4. Notify User (They can see this when they log in next)
+    add_notification(student['account_id'], "Your account has been restored by the Administrator.")
+    
+    flash(f"User {student['full_name']} restored successfully.")
     return redirect('/dashboard')
 
 @app.route('/admin/suspend_user', methods=['POST'])
