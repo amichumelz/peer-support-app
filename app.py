@@ -2005,6 +2005,8 @@ def admin_dashboard():
         <div class="tab-item" onclick="openTab('alerts', this)">🚨 Mood Alerts & Assign</div>
         <div class="tab-item" onclick="openTab('reports', this)">🛡️ Moderation</div>
         <div class="tab-item" onclick="openTab('scoring', this)">⚖️ Scoring</div>
+        <div class="tab-item" onclick="openTab('suspended', this)" style="color:var(--red);">⛔ Suspended</div>
+</div>
     </div>
     <div id="view-suspended" class="tab-content" style="display:none;">
         <div class="card" style="border-top: 5px solid var(--red);">
