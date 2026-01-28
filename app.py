@@ -1833,8 +1833,10 @@ def book_appointment():
 # ADMIN FEATURES 
 # ==========================================
 def admin_dashboard():
-    # --- 1. METRICS ---
+    # --- 1. METRICS DATA ---
     total_counselors = query_db("SELECT COUNT(*) as c FROM Counselor", one=True)['c']
+    
+    # Active assignments (active cases)
     active_cases = query_db("""
         SELECT COUNT(DISTINCT student_id) as c FROM (
             SELECT student_id FROM Assignment WHERE status='Accepted'
@@ -1842,13 +1844,19 @@ def admin_dashboard():
             SELECT student_id FROM CounselorAppointment WHERE status='Confirmed'
         ) as all_active
     """, one=True)['c']
+    
+    # Average caseload
     avg_load = round(active_cases / total_counselors, 1) if total_counselors > 0 else 0
 
-    # --- 2. FETCH COUNSELORS ---
+    # --- 2. FETCH COUNSELORS & LOADS (FIXED) ---
     raw_counselors = query_db("SELECT * FROM Counselor")
     counselors = []
+
     for row in raw_counselors:
+        # Convert row to a standard mutable dictionary to avoid 'no attribute' errors
         c = dict(row)
+        
+        # Count active assignments for this specific counselor
         cnt = query_db("""
             SELECT COUNT(DISTINCT student_id) as c FROM (
                 SELECT student_id FROM Assignment WHERE counselor_id = %s AND status='Accepted'
@@ -1856,78 +1864,126 @@ def admin_dashboard():
                 SELECT student_id FROM CounselorAppointment WHERE counselor_id = %s AND status='Confirmed'
             ) as combined
         """, (c['counselor_id'], c['counselor_id']), one=True)
+        
         c['load'] = cnt['c'] if cnt else 0
         c['name'] = c['full_name']
+        
+        # Determine status
         c['status'] = 'Available' if c['load'] < 20 else 'Full Capacity'
         c['status_color'] = 'green' if c['load'] < 20 else 'red'
+        
         counselors.append(c)
 
-    # --- 3. ALERTS & APPOINTMENTS ---
+    # --- 3. MOOD ALERTS ---
     alerts = query_db("""
-        SELECT s.student_id, s.full_name, s.account_id, AVG(m.mood_level) as avg_mood, COUNT(m.checkin_id) as total_logs, MAX(m.checkin_date) as last_checkin, (AVG(m.mood_level) / 7) * 100 as wellness_percentage
-        FROM MoodCheckIn m JOIN Student s ON m.student_id = s.student_id
-        GROUP BY s.student_id HAVING wellness_percentage < 30
+        SELECT 
+            s.student_id, s.full_name, s.account_id,
+            AVG(m.mood_level) as avg_mood,
+            COUNT(m.checkin_id) as total_logs,
+            MAX(m.checkin_date) as last_checkin,
+            (AVG(m.mood_level) / 7) * 100 as wellness_percentage
+        FROM MoodCheckIn m
+        JOIN Student s ON m.student_id = s.student_id
+        GROUP BY s.student_id
+        HAVING wellness_percentage < 30
     """)
+    
+    # Process alerts to see if they are already assigned
     for a in alerts:
+        # Check assignments
         assigned = query_db("SELECT * FROM Assignment WHERE student_id = %s", (a['student_id'],), one=True)
+        # Check appointments
         booked = query_db("SELECT * FROM CounselorAppointment WHERE student_id = %s AND status IN ('Confirmed', 'Pending')", (a['student_id'],), one=True)
+        
         a['is_assigned'] = bool(assigned or booked)
         a['percentage'] = int(a['wellness_percentage'])
         a['avg_mood'] = round(a['avg_mood'], 1)
 
+    # --- 4. APPOINTMENT REQUESTS ---
     appt_requests = query_db("""
         SELECT ca.*, s.full_name as student_name, s.score_percentage, c.full_name as requested_counselor
-        FROM CounselorAppointment ca JOIN Student s ON ca.student_id = s.student_id JOIN Counselor c ON ca.counselor_id = c.counselor_id
-        WHERE ca.status = 'Pending' ORDER BY ca.appointment_date ASC
+        FROM CounselorAppointment ca
+        JOIN Student s ON ca.student_id = s.student_id
+        JOIN Counselor c ON ca.counselor_id = c.counselor_id
+        WHERE ca.status = 'Pending'
+        ORDER BY ca.appointment_date ASC
     """)
 
-    # --- 4. MODERATION ---
+# --- 5. MODERATION & FLAGS ---
+    
+    # 1. Fetch BOTH Pending and Escalated reports
     reports = query_db("SELECT * FROM Report WHERE status IN ('Pending', 'Escalated') ORDER BY created_at ASC")
+    
+    # 2. Process them (Add names, content, priority)
     for r in reports:
+        # A. Fetch Content & Author
         r['content_preview'] = "Content deleted or unavailable"
         r['reported_user_id'] = None
         r['reported_user_name'] = "Unknown"
+        
         if r['target_type'] == 'post':
             p = query_db("SELECT p.content, p.student_id, s.full_name FROM Post p JOIN Student s ON p.student_id=s.student_id WHERE post_id = %s", (r['target_id'],), one=True)
-            if p: r['content_preview'] = p['content']; r['reported_user_id'] = p['student_id']; r['reported_user_name'] = p['full_name']
+            if p: 
+                r['content_preview'] = p['content']
+                r['reported_user_id'] = p['student_id']
+                r['reported_user_name'] = p['full_name']
         elif r['target_type'] == 'comment':
             c = query_db("SELECT c.content, c.student_id, s.full_name FROM Comment c JOIN Student s ON c.student_id=s.student_id WHERE comment_id = %s", (r['target_id'],), one=True)
-            if c: r['content_preview'] = c['content']; r['reported_user_id'] = c['student_id']; r['reported_user_name'] = c['full_name']
-        
+            if c: 
+                r['content_preview'] = c['content']
+                r['reported_user_id'] = c['student_id']
+                r['reported_user_name'] = c['full_name']
+
+        # B. Get Reporter Name 
         reporter = query_db("SELECT username FROM Account WHERE account_id=%s", (r['reporter_id'],), one=True)
         r['reporter_name'] = reporter['username'] if reporter else "Unknown"
-        
+
+        # C. Priority Logic
         if r['status'] == 'Escalated':
-            r['priority'] = 'CRITICAL'; r['border_color'] = 'red'; r['badge_color'] = 'red'; r['alert_msg'] = "🚨 MODERATOR VERIFIED VIOLATION"
+            r['priority'] = 'CRITICAL'
+            r['border_color'] = 'red'
+            r['badge_color'] = 'red'
+            r['alert_msg'] = "🚨 MODERATOR VERIFIED VIOLATION"
         else:
-            is_high = any(k in r['reason'].lower() for k in ['harassment', 'threat', 'self-harm', 'severe'])
-            r['priority'] = 'High' if is_high else 'Normal'; r['border_color'] = 'orange' if is_high else '#ddd'; r['badge_color'] = 'orange' if is_high else '#777'; r['alert_msg'] = ""
+            severe_keywords = ['harassment', 'threat', 'self-harm', 'severe']
+            is_high = any(k in r['reason'].lower() for k in severe_keywords)
+            r['priority'] = 'High' if is_high else 'Normal'
+            r['border_color'] = 'orange' if is_high else '#ddd'
+            r['badge_color'] = 'orange' if is_high else '#777'
+            r['alert_msg'] = ""
+
+    # 3. Sort: Escalated (Critical) First
     reports.sort(key=lambda x: 0 if x.get('status') == 'Escalated' else 1)
 
+    # ... (Flags logic follows this) ...
     flags = query_db("SELECT f.*, s.full_name as s_name, s.score_percentage as s_score FROM FlagAccount f JOIN Student s ON f.student_id=s.student_id WHERE f.status='Pending'")
 
-    # --- 5. SCORING LISTS (FIXED LOGIC) ---
-    
-    # FIX 1: Only fetch ACTIVE users for the Restricted list.
-    # This prevents suspended users from appearing here (since they are inactive).
+    # --- SCORING TAB DATA PREP ---
+    # Fetch restricted users with their active appeals and violation history
     restricted_users = query_db("""
         SELECT s.*, a.username 
         FROM Student s 
         JOIN Account a ON s.account_id = a.account_id 
         WHERE s.points < %s AND a.is_active = 1 
     """, (CONFIG['restriction_threshold'],))
-    
+
     for u in restricted_users:
         u['name'] = u['full_name']
+        
+        # 1. Get Active Appeal
         u['active_appeal'] = query_db("SELECT * FROM Appeal WHERE student_id = %s AND status='Pending'", (u['student_id'],), one=True)
+        
+        # 2. Get Violation History (Resolved Reports against this user)
+        # This joins Reports to Posts/Comments to find violations by this student
         u['history'] = query_db("""
-            SELECT r.reason, r.created_at, 'Violation' as type FROM Report r
+            SELECT r.reason, r.created_at, 'Violation' as type
+            FROM Report r
             LEFT JOIN Post p ON r.target_type='post' AND r.target_id=p.post_id
             LEFT JOIN Comment c ON r.target_type='comment' AND r.target_id=c.comment_id
-            WHERE r.status='Resolved' AND (p.student_id=%s OR c.student_id=%s) ORDER BY r.created_at DESC
+            WHERE r.status='Resolved' AND (p.student_id=%s OR c.student_id=%s)
+            ORDER BY r.created_at DESC
         """, (u['student_id'], u['student_id']))
 
-    # FETCH SUSPENDED USERS
     suspended_users = query_db("""
         SELECT s.*, a.username, a.is_active,
         (SELECT reason FROM Appeal WHERE student_id = s.student_id AND status='Pending' LIMIT 1) as appeal_reason,
@@ -1946,41 +2002,30 @@ def admin_dashboard():
 
     <div style="display:flex; gap:20px; border-bottom:1px solid #ddd; margin-bottom:20px;">
         <div class="tab-item tab-active" onclick="openTab('counselors', this)">🧑‍⚕️ Counselors & Appts</div>
-        <div class="tab-item" onclick="openTab('alerts', this)">🚨 Mood Alerts</div>
+        <div class="tab-item" onclick="openTab('alerts', this)">🚨 Mood Alerts & Assign</div>
         <div class="tab-item" onclick="openTab('reports', this)">🛡️ Moderation</div>
         <div class="tab-item" onclick="openTab('scoring', this)">⚖️ Scoring</div>
-        <div class="tab-item" onclick="openTab('suspended', this)" style="color:var(--red);">⛔ Suspended</div>
     </div>
-
     <div id="view-suspended" class="tab-content" style="display:none;">
         <div class="card" style="border-top: 5px solid var(--red);">
             <h3>⛔ Suspended Accounts</h3>
             {% if suspended_users %}
                 <table style="width:100%">
-                    <tr>
-                        <th>User</th>
-                        <th>Program</th>
-                        <th>Status</th>
-                        <th>Appeal</th>
-                        <th>Action</th>
-                    </tr>
+                    <tr><th>User</th><th>Program</th><th>Appeal</th><th>Action</th></tr>
                     {% for u in suspended_users %}
                     <tr>
                         <td><strong>{{ u.full_name }}</strong><br><small>@{{ u.username }}</small></td>
                         <td>{{ u.program }}</td>
-                        <td><span class="badge" style="background:var(--red); color:white;">Suspended</span></td>
                         <td>
                             {% if u.appeal_reason %}
-                                <div style="background:#fff8e1; padding:5px; border-left:3px solid var(--orange); font-size:0.8rem;">
-                                    "{{ u.appeal_reason }}"
-                                </div>
+                                <div style="background:#fff8e1; padding:5px; font-size:0.8rem;">"{{ u.appeal_reason }}"</div>
                             {% else %}<span style="color:#ccc;">None</span>{% endif %}
                         </td>
                         <td>
                             <form action="/admin/restore_user" method="POST" onsubmit="return confirm('Restore user?')">
                                 <input type="hidden" name="student_id" value="{{ u.student_id }}">
                                 {% if u.appeal_id %}<input type="hidden" name="appeal_id" value="{{ u.appeal_id }}">{% endif %}
-                                <button class="btn btn-sm btn-green">Restore Account</button>
+                                <button class="btn btn-sm btn-green">Restore</button>
                             </form>
                         </td>
                     </tr>
@@ -1991,167 +2036,388 @@ def admin_dashboard():
             {% endif %}
         </div>
     </div>
-
     <div id="view-scoring" class="tab-content" style="display:none;">
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:25px;">
+            
             <div>
-                <h3 style="margin-top:0;">⚙️ Scoring Config</h3>
+                <h3 style="margin-top:0;">⚙️ Scoring Configuration</h3>
                 <form action="/admin/update_scoring_config" method="POST">
-                    <div class="card" style="background:#f0fff4;">
-                        <h4 style="color:var(--green);">Rewards (+)</h4>
-                        <label>Post</label><input type="number" name="score_post" value="{{ config.score_post }}">
-                        <label>Helpful</label><input type="number" name="score_helpful" value="{{ config.score_helpful }}">
-                        <label>Support</label><input type="number" name="score_support" value="{{ config.score_support }}">
+                    <div class="card" style="border-top: 5px solid var(--green); background:#f0fff4;">
+                        <h4 style="color:var(--green); margin-top:0;">Positive Contributions (+)</h4>
+                        <label>Post Creation</label><input type="number" name="score_post" value="{{ config.score_post }}">
+                        <label>Helpful Answer</label><input type="number" name="score_helpful" value="{{ config.score_helpful }}">
+                        <label>Peer Support</label><input type="number" name="score_support" value="{{ config.score_support }}">
                     </div>
-                    <div class="card" style="background:#fff5f5; margin-top:10px;">
-                        <h4 style="color:var(--red);">Penalties (-)</h4>
-                        <label>Removal</label><input type="number" name="penalty_removal" value="{{ config.penalty_removal }}">
+                    <div class="card" style="border-top: 5px solid var(--red); background:#fff5f5; margin-top:15px;">
+                        <h4 style="color:var(--red); margin-top:0;">Violations & Penalties (-)</h4>
+                        <label>Content Removal</label><input type="number" name="penalty_removal" value="{{ config.penalty_removal }}">
                         <label>Harassment</label><input type="number" name="penalty_harassment" value="{{ config.penalty_harassment }}">
-                        <label>Severe</label><input type="number" name="penalty_severe" value="{{ config.penalty_severe }}">
+                        <label>Severe Violation</label><input type="number" name="penalty_severe" value="{{ config.penalty_severe }}">
                     </div>
-                    <button class="btn btn-blue" style="width:100%; margin-top:10px;">Save Config</button>
+                    <button class="btn btn-blue" style="width:100%; margin-top:15px;">Save Configuration</button>
                 </form>
             </div>
+
             <div>
-                <h3 style="margin-top:0;">🚫 Restricted (Active but Low Score)</h3>
+                <h3 style="margin-top:0;">🚫 Restricted Users (< 60%)</h3>
                 <div class="card">
                     {% if restricted_users %}
                         <table style="width:100%">
                             <tr><th>User</th><th>Score</th><th>Action</th></tr>
                             {% for u in restricted_users %}
                             <tr>
-                                <td><strong>{{ u.name }}</strong><br><small>Vio: {{ u.violations }}</small></td>
+                                <td>
+                                    <strong>{{ u.name }}</strong><br>
+                                    <small>Violations: {{ u.violations }}</small>
+                                </td>
                                 <td><span class="badge" style="background:var(--red); color:white;">{{ u.score_percentage }}%</span></td>
                                 <td>
-                                    <button onclick="openSuspendModal('{{ u.student_id }}', '{{ u.name }}', '{{ u.score_percentage }}', '{{ u.violations }}')" class="btn btn-sm btn-red">Suspend</button>
-                                    {% if u.active_appeal %}
-                                        <button onclick='openAppealModal({{ u|tojson }})' class="btn btn-sm btn-blue">Appeal</button>
-                                    {% endif %}
+                                    <div style="display:flex; gap:5px;">
+                                        <button onclick="openSuspendModal('{{ u.student_id }}', '{{ u.name }}', '{{ u.score_percentage }}', '{{ u.violations }}')" class="btn btn-sm btn-red">Suspend</button>
+                                        
+                                        {% if u.active_appeal %}
+                                            <button onclick='openAppealModal({{ u|tojson }})' class="btn btn-sm btn-blue">Review Appeal</button>
+                                        {% endif %}
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
                         </table>
-                    {% else %}<p>No restricted users.</p>{% endif %}
+                    {% else %}
+                        <p style="text-align:center; padding:20px; color:var(--sub);">All users in good standing.</p>
+                    {% endif %}
                 </div>
             </div>
         </div>
     </div>
 
+    <div id="suspend-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+        <div class="card" style="max-width:400px; margin:100px auto;">
+            <h3>Suspend User</h3>
+            <p><strong>User:</strong> <span id="susp-name"></span></p>
+            <p>Current Score: <span id="susp-score"></span>% (Violations: <span id="susp-vio"></span>)</p>
+            
+            <form action="/admin/suspend_user" method="POST" onsubmit="return confirm('Confirm Suspension? User will be blocked.');">
+                <input type="hidden" name="student_id" id="susp-id">
+                
+                <label>Duration</label>
+                <select name="duration">
+                    <option value="7">7 Days</option>
+                    <option value="14">14 Days</option>
+                    <option value="30">30 Days</option>
+                    <option value="Indefinite">Indefinite</option>
+                </select>
+                
+                <label>Reason</label>
+                <select name="reason">
+                    <option>Repeated Violations</option>
+                    <option>Refused to improve</option>
+                    <option>Harmful Behavior</option>
+                </select>
+                
+                <div style="text-align:right; margin-top:15px;">
+                    <button type="button" onclick="document.getElementById('suspend-modal').style.display='none'" class="btn btn-outline">Cancel</button>
+                    <button class="btn btn-red">Confirm Suspension</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="appeal-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+        <div class="card" style="max-width:500px; margin:50px auto;">
+            <h3>Review Appeal</h3>
+            <div style="background:#f9f9f9; padding:10px; border-radius:5px; margin-bottom:10px;">
+                <strong>User Appeal:</strong>
+                <p id="app-text" style="font-style:italic;"></p>
+            </div>
+            
+            <h4>Behavioral History</h4>
+            <div id="app-history" style="max-height:150px; overflow-y:auto; border:1px solid #eee; padding:5px; font-size:0.85rem; margin-bottom:15px;">
+                </div>
+
+            <form action="/admin/process_appeal" method="POST">
+                <input type="hidden" name="appeal_id" id="app-id">
+                <input type="hidden" name="student_id" id="app-sid">
+                
+                <label>Decision</label>
+                <select name="decision" onchange="toggleDenyReason(this.value)">
+                    <option value="approve">Approve (Restore to 60%)</option>
+                    <option value="deny">Deny (Extend Restriction)</option>
+                </select>
+                
+                <div id="deny-reason-box" style="display:none;">
+                    <label>Denial Reason / Explanation</label>
+                    <textarea name="admin_note" placeholder="Explain why appeal is denied..."></textarea>
+                </div>
+
+                <div style="text-align:right; margin-top:15px;">
+                    <button type="button" onclick="document.getElementById('appeal-modal').style.display='none'" class="btn btn-outline">Cancel</button>
+                    <button class="btn btn-blue">Submit Decision</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    
+    function openModModal(id, name, reason, type, sid) {
+        document.getElementById('mod-action-modal').style.display = 'block';
+        document.getElementById('mod-report-id').value = id;
+        document.getElementById('mod-user').innerText = name;
+        document.getElementById('mod-reason').innerText = reason;
+        document.getElementById('mod-target-type').value = type;
+        document.getElementById('mod-student-id').value = sid;
+    }
+
+    function openSuspendModal(id, name, score, vio) {
+        document.getElementById('suspend-modal').style.display = 'block';
+        document.getElementById('susp-id').value = id;
+        document.getElementById('susp-name').innerText = name;
+        document.getElementById('susp-score').innerText = score;
+        document.getElementById('susp-vio').innerText = vio;
+    }
+
+    function openAppealModal(user) {
+        document.getElementById('appeal-modal').style.display = 'block';
+        document.getElementById('app-id').value = user.active_appeal.appeal_id;
+        document.getElementById('app-sid').value = user.student_id;
+        document.getElementById('app-text').innerText = user.active_appeal.reason;
+        
+        let histHtml = "";
+        if(user.history.length > 0) {
+            user.history.forEach(h => {
+                histHtml += `<div style='border-bottom:1px solid #eee; padding:5px;'>❌ ${h.reason} <span style='color:#999; float:right'>${h.created_at}</span></div>`;
+            });
+        } else {
+            histHtml = "No recent history found.";
+        }
+        document.getElementById('app-history').innerHTML = histHtml;
+    }
+
+    function toggleDenyReason(val) {
+        document.getElementById('deny-reason-box').style.display = (val === 'deny') ? 'block' : 'none';
+    }
+
+    function openTab(tabName, elm) {
+        document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
+        document.getElementById('view-' + tabName).style.display = 'block';
+        document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('tab-active'));
+        elm.classList.add('tab-active');
+    }
+    </script>
+
     <div id="view-counselors" class="tab-content">
         <div class="grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:20px;">
-             <div class="card" style="text-align:center;"><h2>{{ total_counselors }}</h2><small>Counselors</small></div>
-             <div class="card" style="text-align:center;"><h2>{{ active_cases }}</h2><small>Active Cases</small></div>
-             <div class="card" style="text-align:center;"><h2>{{ avg_load }}</h2><small>Avg Load</small></div>
-             <div class="card" style="text-align:center;"><h2>100%</h2><small>Response</small></div>
+            <div class="card" style="text-align:center; padding:15px;">
+                <div style="font-size:2rem; font-weight:bold;">{{ total_counselors }}</div>
+                <div style="color:var(--sub); font-size:0.85rem;">Total Counselors</div>
+            </div>
+            <div class="card" style="text-align:center; padding:15px;">
+                <div style="font-size:2rem; font-weight:bold; color:var(--blue);">{{ active_cases }}</div>
+                <div style="color:var(--sub); font-size:0.85rem;">Active Cases</div>
+            </div>
+            <div class="card" style="text-align:center; padding:15px;">
+                <div style="font-size:2rem; font-weight:bold;">{{ avg_load }}</div>
+                <div style="color:var(--sub); font-size:0.85rem;">Avg Caseload</div>
+            </div>
+            <div class="card" style="text-align:center; padding:15px;">
+                <div style="font-size:2rem; font-weight:bold; color:var(--green);">100%</div>
+                <div style="color:var(--sub); font-size:0.85rem;">Response Rate</div>
+            </div>
         </div>
-        <div class="card" style="border-left:4px solid var(--orange);">
-            <h3>Pending Appointments</h3>
+
+        <div class="card" style="border-left:4px solid var(--orange); margin-bottom:25px;">
+            <h3>📅 Pending Appointment Requests</h3>
             {% if appt_requests %}
                 <table style="width:100%">
-                    <tr><th>Student</th><th>Date</th><th>Reason</th><th>Action</th></tr>
+                    <tr>
+                        <th>Student</th>
+                        <th>Wellness</th>
+                        <th>Requested Date</th>
+                        <th>Reason</th>
+                        <th>Requested Counselor</th>
+                        <th>Action</th>
+                    </tr>
                     {% for r in appt_requests %}
                     <tr>
-                        <td>{{ r.student_name }}</td><td>{{ r.appointment_date }}</td><td>{{ r.reason }}</td>
+                        <td><strong>{{ r.student_name }}</strong></td>
+                        <td style="color:{{ 'red' if r.score_percentage < 50 else 'green' }}">{{ r.score_percentage }}%</td>
+                        <td>{{ r.appointment_date }}</td>
+                        <td>{{ r.reason }}</td>
+                        <td>{{ r.requested_counselor }}</td>
                         <td>
-                           <form action="/admin/confirm_appt" method="POST">
+                            <form action="/admin/confirm_appt" method="POST" style="display:flex; gap:5px;">
                                 <input type="hidden" name="appt_id" value="{{ r.appointment_id }}">
-                                <input type="hidden" name="final_counselor_id" value="{{ r.counselor_id }}">
-                                <button class="btn btn-sm btn-green">Confirm</button>
-                           </form>
+                                
+                                <select name="final_counselor_id" style="padding:5px; border-radius:4px; border:1px solid #ccc; width:120px;">
+                                    <option value="{{ r.counselor_id }}" selected>Confirm Current</option>
+                                    {% for c in counselors %}
+                                        {% if c.counselor_id != r.counselor_id %}
+                                            <option value="{{ c.counselor_id }}">Reassign: {{ c.name }}</option>
+                                        {% endif %}
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-sm btn-green">✓</button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}
                 </table>
-            {% else %}<p>No pending appointments.</p>{% endif %}
+            {% else %}
+                <p style="color:var(--sub);">No pending appointment requests.</p>
+            {% endif %}
+        </div>
+
+        <h3>Counselor Availability</h3>
+        <div class="grid">
+            {% for c in counselors %}
+            <div class="card">
+                <div style="display:flex; justify-content:space-between;">
+                    <h3>{{ c.name }}</h3>
+                    <span class="badge" style="background:{{ c.status_color }}; color:white;">{{ c.status }}</span>
+                </div>
+                <p style="color:var(--sub);">{{ c.specialization }}</p>
+                <div style="margin-top:10px; font-weight:bold;">
+                    Current Caseload: {{ c.load }} / 20
+                </div>
+                <div style="background:#eee; height:6px; border-radius:3px; margin-top:5px; width:100%;">
+                    <div style="background:var(--blue); height:100%; border-radius:3px; width:{{ (c.load/20)*100 }}%;"></div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
     </div>
-    
+
     <div id="view-alerts" class="tab-content" style="display:none;">
         <div class="card">
-            <h3>Mood Alerts (< 30%)</h3>
-            <table>
-                <tr><th>Student</th><th>Severity</th><th>Assign</th></tr>
-                {% for a in alerts %}
+            <h3>🚨 Students Requiring Attention (Score < 30%)</h3>
+            <table style="width:100%">
                 <tr>
-                    <td>{{ a.full_name }}</td>
-                    <td><span class="badge" style="background:red; color:white;">{{ a.percentage }}%</span></td>
+                    <th>Student Details</th>
+                    <th>Alert Severity</th>
+                    <th>Last Active</th>
+                    <th>Assignment Action</th>
+                </tr>
+                {% for a in alerts %}
+                <tr style="border-bottom:1px solid #eee;">
+                    <td>
+                        <strong>{{ a.full_name }}</strong><br>
+                        <small>Logs: {{ a.total_logs }}</small>
+                    </td>
+                    <td>
+                        <span class="badge" style="background:#ffe5e5; color:red; font-size:1rem;">
+                            {{ a.percentage }}% (Critical)
+                        </span>
+                    </td>
+                    <td>{{ a.last_checkin }}</td>
                     <td>
                         {% if not a.is_assigned %}
-                        <form action="/admin/assign_counselor" method="POST">
-                            <input type="hidden" name="student_id" value="{{ a.student_id }}">
-                            <select name="counselor_id">{% for c in counselors %}<option value="{{ c.counselor_id }}">{{ c.name }}</option>{% endfor %}</select>
-                            <button class="btn btn-sm btn-blue">Assign</button>
-                        </form>
-                        {% else %}Assigned{% endif %}
+                            <form action="/admin/assign_counselor" method="POST" style="background:#f9f9f9; padding:10px; border-radius:8px;">
+                                <input type="hidden" name="student_id" value="{{ a.student_id }}">
+                                
+                                <label style="font-size:0.8rem; font-weight:bold;">Select Counselor:</label>
+                                <select name="counselor_id" required style="margin-bottom:5px;">
+                                    <option value="">-- Choose based on capacity --</option>
+                                    {% for c in counselors %}
+                                        <option value="{{ c.counselor_id }}">
+                                            {{ c.name }} (Load: {{ c.load }}) - {{ c.specialization }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-sm btn-blue" style="width:100%;">Confirm Assignment</button>
+                            </form>
+                        {% else %}
+                            <span class="badge" style="background:var(--green); color:white;">✓ Assigned/Booked</span>
+                        {% endif %}
                     </td>
                 </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align:center; padding:20px;">No critical alerts.</td></tr>
                 {% endfor %}
             </table>
         </div>
     </div>
 
-    <div id="view-reports" class="tab-content" style="display:none;">
+<div id="view-reports" class="tab-content" style="display:none;">
         <div class="card">
             <h3>Moderation Queue</h3>
             {% if reports %}
                 {% for r in reports %}
-                <div style="border:1px solid {{ r.border_color }}; padding:10px; margin-bottom:10px;">
-                    <span class="badge" style="background:{{ r.badge_color }}; color:white;">{{ r.priority }}</span>
-                    <strong>{{ r.reported_user_name }}</strong>: {{ r.reason }}
-                    <p style="background:#eee; padding:5px;">"{{ r.content_preview }}"</p>
-                    <button onclick="openModModal('{{ r.report_id }}', '{{ r.reported_user_name }}', '{{ r.reason }}', '{{ r.target_type }}', '{{ r.reported_user_id }}')" class="btn btn-sm btn-blue">Act</button>
+                <div style="border: 2px solid {{ r.border_color }}; border-radius: 8px; padding: 15px; margin-bottom: 15px; background: #fff;">
+                    
+                    {% if r.alert_msg %}
+                    <div style="background: {{ r.badge_color }}; color: white; padding: 5px 10px; border-radius: 4px; font-weight: bold; margin-bottom: 10px; font-size: 0.85rem;">
+                        {{ r.alert_msg }}
+                    </div>
+                    {% endif %}
+
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                        <div>
+                            <span class="badge" style="background:{{ r.badge_color }}; color:white;">{{ r.priority }} Priority</span>
+                            <span class="badge">{{ r.target_type|upper }}</span>
+                        </div>
+                        <small style="color:var(--sub);">{{ r.created_at }}</small>
+                    </div>                    
+                    <p><strong>Reported User:</strong> {{ r.reported_user_name }}</p>
+                    <p><strong>Violation Type:</strong> {{ r.reason }}</p>
+                    <div style="background:#f9f9f9; padding:10px; border-left:3px solid var(--blue); margin:10px 0; font-style:italic;">
+                        "{{ r.content_preview }}"
+                    </div>
+                    
+                    <div style="text-align:right;">
+                        <button onclick="openModModal('{{ r.report_id }}', '{{ r.reported_user_name }}', '{{ r.reason }}', '{{ r.target_type }}', '{{ r.reported_user_id }}')" class="btn btn-sm btn-blue">Review & Act</button>
+                    </div>
                 </div>
                 {% endfor %}
-            {% endif %}
+            {% else %}<p style="color:var(--sub); padding:20px;">No pending reports.</p>{% endif %}
+        </div>
+        
+        <div class="card" style="margin-top:20px;">
+            <h3>Flagged Students</h3>
+            {% if flags %}
+                <table>
+                    <tr><th>Student</th><th>Score</th><th>Reason</th><th>Action</th></tr>
+                    {% for f in flags %}
+                    <tr>
+                        <td>{{ f.s_name }}</td>
+                        <td>{{ f.s_score }}</td>
+                        <td>{{ f.reason }}</td>
+                        <td>
+                            <form action="/admin/handle_flag/{{ f.student_id }}/suspend" method="POST">
+                                <button class="btn btn-sm btn-red">Suspend</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            {% else %}<p>No flags.</p>{% endif %}
         </div>
     </div>
-    
-    <div id="suspend-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
-        <div class="card" style="max-width:400px; margin:100px auto;">
-            <h3>Suspend User</h3>
-            <p>User: <span id="susp-name"></span></p>
-            <form action="/admin/suspend_user" method="POST">
-                <input type="hidden" name="student_id" id="susp-id">
-                <label>Duration</label><select name="duration"><option value="7">7 Days</option><option value="Indefinite">Indefinite</option></select>
-                <label>Reason</label><input type="text" name="reason" required>
-                <button class="btn btn-red" style="width:100%">Confirm</button>
-                <button type="button" onclick="document.getElementById('suspend-modal').style.display='none'" class="btn btn-outline" style="width:100%; margin-top:5px;">Cancel</button>
-            </form>
-        </div>
-    </div>
-    
-    <div id="appeal-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
-        <div class="card" style="max-width:500px; margin:50px auto;">
-            <h3>Review Appeal</h3>
-            <p id="app-text"></p>
-            <form action="/admin/process_appeal" method="POST">
-                <input type="hidden" name="appeal_id" id="app-id">
-                <input type="hidden" name="student_id" id="app-sid">
-                <select name="decision"><option value="approve">Approve</option><option value="deny">Deny</option></select>
-                <button class="btn btn-blue">Submit</button>
-                <button type="button" onclick="document.getElementById('appeal-modal').style.display='none'" class="btn btn-outline">Cancel</button>
-            </form>
-        </div>
-    </div>
-    
+
     <div id="mod-action-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
         <div class="card" style="max-width:500px; margin:50px auto;">
             <h3>Evaluate Violation</h3>
             <p><strong>User:</strong> <span id="mod-user"></span></p>
             <p><strong>Reported Reason:</strong> <span id="mod-reason"></span></p>
-            <form action="/admin/resolve_report_action" method="POST">
+            
+            <form action="/admin/resolve_report_action" method="POST" onsubmit="return confirm('Confirm penalty and action?');">
                 <input type="hidden" name="report_id" id="mod-report-id">
                 <input type="hidden" name="target_student_id" id="mod-student-id">
                 <input type="hidden" name="target_type" id="mod-target-type">
-                <label>Action</label>
-                <select name="action_code">
-                    <option value="dismiss">Dismiss</option>
-                    <option value="warn">Warn</option>
-                    <option value="remove_15">Remove (-15pts)</option>
-                    <option value="remove_30">Remove (-30pts)</option>
+                
+                <label>Select Severity & Action:</label>
+                <select name="action_code" required style="padding:10px; font-size:1rem; margin-bottom:15px;">
+                    <option value="dismiss">Dismiss Report (No Violation)</option>
+                    <option value="warn">Warn User (First Minor Violation)</option>
+                    <option value="remove_15">Remove Content - Minor (-15 pts)</option>
+                    <option value="remove_30">Remove Content - Moderate/Harassment (-30 pts)</option>
+                    <option value="remove_50">Remove Content - Severe/Threat (-50 pts)</option>
                 </select>
-                <button class="btn btn-red" style="margin-top:10px;">Confirm</button>
-                <button type="button" onclick="document.getElementById('mod-action-modal').style.display='none'" class="btn btn-outline">Cancel</button>
+                
+                <div style="text-align:right;">
+                    <button type="button" onclick="document.getElementById('mod-action-modal').style.display='none'" class="btn btn-outline">Cancel</button>
+                    <button class="btn btn-red">Confirm Action</button>
+                </div>
             </form>
         </div>
     </div>
@@ -2163,32 +2429,9 @@ def admin_dashboard():
         document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('tab-active'));
         elm.classList.add('tab-active');
     }
-    
-    function openSuspendModal(id, name, score, vio) {
-        document.getElementById('suspend-modal').style.display = 'block';
-        document.getElementById('susp-id').value = id;
-        document.getElementById('susp-name').innerText = name;
-    }
-    
-    function openAppealModal(user) {
-        document.getElementById('appeal-modal').style.display = 'block';
-        document.getElementById('app-id').value = user.active_appeal.appeal_id;
-        document.getElementById('app-sid').value = user.student_id;
-        document.getElementById('app-text').innerText = user.active_appeal.reason;
-    }
-    
-    function openModModal(id, name, reason, type, sid) {
-        document.getElementById('mod-action-modal').style.display = 'block';
-        document.getElementById('mod-report-id').value = id;
-        document.getElementById('mod-user').innerText = name;
-        document.getElementById('mod-reason').innerText = reason;
-        document.getElementById('mod-target-type').value = type;
-        document.getElementById('mod-student-id').value = sid;
-    }
     </script>
     """
     
-    # FIX 4: Ensure suspended_users is passed to the template
     return render_page(content, 
         total_counselors=total_counselors,
         active_cases=active_cases,
@@ -2199,7 +2442,7 @@ def admin_dashboard():
         reports=reports,
         flags=flags,
         restricted_users=restricted_users,
-        suspended_users=suspended_users,  # <--- CRITICAL FIX
+        suspended_users=suspended_users,
         config=CONFIG,
         now=datetime.now().strftime("%Y-%m-%d")
     )
