@@ -2161,7 +2161,7 @@ def admin_dashboard():
             </div>
 
             <div>
-                <h3 style="margin-top:0;">🚫 Restricted Users (< 60%)</h3>
+                <h3 style="margin-top:0;">🚫 Restricted Users (< 60 points)</h3>
                 <div class="card">
                     {% if restricted_users %}
                         <table style="width:100%">
