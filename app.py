@@ -556,7 +556,6 @@ def signup():
             flash("Password must contain at least one symbol (e.g., !@#$%).")
             return redirect('/signup')
         
-
         # 1. Create Account
         try:
             aid = execute_db("INSERT INTO Account (username, email, password, role) VALUES (%s, %s, %s, 'student')", (username, email, password))
@@ -1149,18 +1148,23 @@ def forum():
         
         file_urls = []
         
-        for file in files[:5]: # Limit to 5 files
+        for file in files[:5]:
             if file and file.filename != '':
-                try:
-                    # Upload directly to Cloudinary
-                    # resource_type="auto" allows Videos, Music, and Documents (Excel)
-                    upload_result = cloudinary.uploader.upload(file, resource_type="auto", public_id=file.filename)
-                    # Get the secure URL (starts with https://)
-                    file_urls.append(upload_result['secure_url'])
-                except Exception as e:
-                    print(f"Upload Error: {e}")
-                    flash("Error uploading one of the files. Only png, jpg, jpeg, gif, mp4, mp3, mov, mpeg, mpg, doc, docx, pptx, xls, xlsx files accepted.")
-        
+                # 1. Check extension BEFORE uploading
+                if allowed_file(file.filename):
+                    try:
+                        upload_result = cloudinary.uploader.upload(
+                            file, 
+                            resource_type="auto", 
+                            public_id=file.filename.rsplit('.', 1)[0] # Clean filename
+                        )
+                        file_urls.append(upload_result['secure_url'])
+                    except Exception as e:
+                        print(f"Cloudinary Error: {e}")
+                        flash(f"Cloudinary upload failed for {file.filename}.")
+                else:
+                    flash(f"File type not allowed: {file.filename}")
+
         # Join URLs with a comma to store in DB
         image_url_str = ",".join(file_urls)
         
@@ -1216,6 +1220,16 @@ def forum():
                         <img src="{{ user.avatar }}" style="width:45px; height:45px; border-radius:50%; object-fit:cover;">
                         <div style="flex:1;">
                             <textarea name="content" placeholder="What's on your mind?" rows="2" style="border:none; background:transparent; font-size:1.1rem; resize:none;" required></textarea>
+                            
+                            <div style="margin: 10px 0;">
+                                <label style="font-size: 0.85rem; color: var(--blue); cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                                    <span style="font-size: 1.2rem;">📎</span> 
+                                    <span id="file-count-label">Add Photos/Files (Max 5)</span>
+                                    <input type="file" name="file" multiple style="display: none;" 
+                                        onchange="document.getElementById('file-count-label').innerText = this.files.length + ' files selected'">
+                                </label>
+                            </div>
+
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
                                 <label style="color:var(--blue); font-size:0.9rem; cursor:pointer;"><input type="checkbox" name="anon"> Post Anonymous</label>
                                 <button class="btn btn-blue">Post</button>
@@ -1238,6 +1252,24 @@ def forum():
                 </div>
                 <div style="padding-left: 58px;">
                     <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
+
+                    {% if post.files %}
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+                        {% for url in post.files %}
+                            {# Use a more robust check: lower() and checking if the substring exists #}
+                            {% if '.jpg' in url.lower() or '.jpeg' in url.lower() or '.png' in url.lower() or '.gif' in url.lower() %}
+                                <img src="{{ url }}" style="max-width: 100%; border-radius: 12px; border: 1px solid var(--border); max-height: 300px;" onerror="this.style.display='none'">
+                            {% elif '.mp4' in url.lower() or '.mov' in url.lower() %}
+                                <video controls style="max-width: 100%; border-radius: 12px; max-height: 300px;">
+                                    <source src="{{ url }}" type="video/mp4">
+                                </video>
+                            {% else %}
+                                <a href="{{ url }}" target="_blank" class="btn btn-sm btn-outline">View Attachment</a>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
                     <div class="tweet-actions">
                         <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
                         <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
@@ -1277,6 +1309,7 @@ def forum():
         </script>
     """
     return render_page(content, posts=posts_ui, user=user)
+
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
 def post_detail(pid):
     # Fetch post
