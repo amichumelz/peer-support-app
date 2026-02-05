@@ -4,6 +4,7 @@ import io
 import os
 import random 
 import string 
+import json
 import smtplib
 import cloudinary
 import cloudinary.uploader
@@ -223,7 +224,8 @@ def get_user_by_id(account_id):
         'is_active': bool(account['is_active']),
         # Default fields to prevent UI errors
         'points': 0, 'level': 1, 'score': 100, 'friends': [], 'interests': [], 'caseload': [],
-        'program': '', 'bio': '', 'violations': 0, 'specialization': ''
+        'program': '', 'bio': '', 'violations': 0, 'specialization': '',
+        'avatar': 'https://api.dicebear.com/7.x/identicon/svg?seed=' + account['username']
     }
 
     # 2. Get Role Specific Data
@@ -231,7 +233,7 @@ def get_user_by_id(account_id):
         student = query_db("SELECT * FROM Student WHERE account_id = %s", (account_id,), one=True)
         if student:
             user_data.update({
-                'student_id': student['student_id'], # Internal SQL ID
+                'student_id': student['student_id'],
                 'name': student['full_name'],
                 'program': student['program'],
                 'points': student['points'],
@@ -239,6 +241,7 @@ def get_user_by_id(account_id):
                 'score': student['score_percentage'],
                 'bio': student['bio'],
                 'violations': student['violations'],
+                'avatar': student['avatar_url'] if student['avatar_url'] else 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + student['full_name'],
                 'interests': student['interests'].split(',') if student['interests'] else []
             })
             # Fetch Friends (Account IDs)
@@ -311,9 +314,31 @@ STYLES = """
         padding-bottom: 50px; 
     }
 
+    /* Update this inside your STYLES string */
+    .profile-avatar { 
+        width: 130px; 
+        height: 130px; 
+        background: white; 
+        border: 4px solid white; 
+        border-radius: 50%; 
+        position: absolute; /* Keeps it attached to the banner */
+        bottom: -65px; 
+        left: 20px; 
+        overflow: hidden; 
+        display:flex; 
+        align-items:center; 
+        justify-content:center; 
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+        z-index: 5;
+    }
+
     a { color: var(--blue); text-decoration: none; font-weight: 500; transition: color 0.2s; }
     a:hover { text-decoration: underline; }
     
+    .tweet-header img {
+        border: 1px solid var(--border);
+        background: #f0f0f0;
+    }
     .rainbow-text {
             background: linear-gradient(to right, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3);
             background-size: 200% auto;
@@ -873,10 +898,22 @@ def dashboard():
 def student_dashboard(user):
     user['is_restricted'] = user['points'] < CONFIG['restriction_threshold']
     
-    # 1. Fetch Announcements
+    # 1. Fetch last 7 mood logs for the graph
+    mood_history = query_db("""
+        SELECT mood_level, DATE_FORMAT(checkin_date, '%b %d') as day 
+        FROM MoodCheckIn 
+        WHERE student_id = %s 
+        ORDER BY checkin_date DESC LIMIT 7
+    """, (user['student_id'],))
+    
+    mood_history = mood_history[::-1]
+    
+    # Safely convert to JSON strings for JS
+    labels = json.dumps([row['day'] for row in mood_history])
+    values = json.dumps([row['mood_level'] for row in mood_history])
+
     anns = query_db("SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date_str FROM Announcement ORDER BY date DESC LIMIT 3")
     
-    # 2. Fetch Upcoming Confirmed Sessions 
     sessions = query_db("""
         SELECT ca.*, c.full_name as counselor_name, 
                DATE_FORMAT(ca.appointment_date, '%W, %d %M %Y at %H:%i') as date_pretty
@@ -888,28 +925,82 @@ def student_dashboard(user):
         ORDER BY ca.appointment_date ASC
     """, (user['student_id'],))
 
-    # --- NEW: FETCH PENDING FRIEND REQUESTS ---
     friend_requests = query_db("""
         SELECT f.student_id_1 as requester_id, s.full_name, s.program, s.account_id
         FROM Friendship f
         JOIN Student s ON f.student_id_1 = s.student_id
         WHERE f.student_id_2 = %s AND f.status = 'Pending'
     """, (user['student_id'],))
-    # ------------------------------------------
 
-    content = """
-        <div style="display:flex; justify-content:space-between; align-items:end; margin-bottom:20px;">
+    # Using an f-string requires double braces for literal JS braces
+    content = f"""
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:20px;">
             <div>
-                <h1 style="margin-bottom:5px;">Hi, {{ user.name }} 👋</h1>
-                <span style="color:var(--sub);">{{ user.program }} Student</span>
+                <h1 style="margin-bottom:5px;">Hi, {{{{ user.name }}}} 👋</h1>
+                <span style="color:var(--sub);">{{{{ user.program }}}} Student | <strong>{{{{ user.points }}}} Points</strong></span>
             </div>
-            
             <div style="text-align:right;">
-                <p style="color:var(--sub); margin-top:5px; font-weight:bold;">{{ user.points }} Points</p>
+                 <span class="badge" style="background:var(--blue); color:white; font-size:1rem;">Wellness Score: {{{{ user.score }}}}%</span>
             </div>
         </div>
 
-        {% if user.is_restricted %}
+        <div class="grid" style="grid-template-columns: 2fr 1fr;">
+            <div class="card">
+                <h3>Mood Trend (Last 7 Logs)</h3>
+                <canvas id="moodChart" height="150"></canvas>
+            </div>
+
+            <div class="card">
+                <h3>Log Today's Mood</h3>
+                <p style="color:var(--sub); font-size:0.9rem;">How are you feeling?</p>
+                <form action="/mood_checkin" method="POST">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:1.5rem;">
+                        <label style="cursor:pointer"><input type="radio" name="level" value="1"> 😫</label>
+                        <label style="cursor:pointer"><input type="radio" name="level" value="2"> 😔</label>
+                        <label style="cursor:pointer"><input type="radio" name="level" value="3" checked> 😐</label>
+                        <label style="cursor:pointer"><input type="radio" name="level" value="4"> 🙂</label>
+                        <label style="cursor:pointer"><input type="radio" name="level" value="5"> 😄</label>
+                    </div>
+                    <button class="btn btn-blue" style="width:100%">Submit Entry</button>
+                </form>
+            </div>
+        </div>
+
+        <script>
+            const ctx = document.getElementById('moodChart').getContext('2d');
+            new Chart(ctx, {{
+                type: 'line',
+                data: {{
+                    labels: {labels},
+                    datasets: [{{
+                        label: 'Mood Level',
+                        data: {values},
+                        borderColor: '#1d9bf0',
+                        backgroundColor: 'rgba(29, 155, 240, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 3,
+                        pointBackgroundColor: '#1d9bf0'
+                    }}]
+                }},
+                options: {{
+                    scales: {{
+                        y: {{ 
+                            min: 1, max: 5,
+                            ticks: {{ stepSize: 1, callback: function(value) {{
+                                const emoji = ["", "😫", "😔", "😐", "🙂", "😄"];
+                                return emoji[value];
+                            }} }}
+                        }}
+                    }},
+                    plugins: {{ legend: {{ display: false }} }}
+                }}
+            }});
+        </script>
+
+        {{% if user.is_restricted %}}
         <div class="alert-box" style="border-color:var(--red); color:var(--red); background:#fff5f5;">
             <strong>⚠️ Account Restricted</strong><br>
             Your Safety Score is {{ user.score }}% (Below 60%). You cannot post or comment.
@@ -918,71 +1009,57 @@ def student_dashboard(user):
                 <button class="btn btn-red btn-sm">Submit Appeal</button>
             </form>
         </div>
-        {% endif %}
+        {{% endif %}}
 
         <div class="grid">
-            {% if friend_requests %}
+            {{% if friend_requests %}}
             <div class="card" style="border-left: 4px solid var(--orange);">
                 <h3>💌 Friend Requests</h3>
-                {% for req in friend_requests %}
+                {{% for req in friend_requests %}}
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f0f0;">
                         <div>
-                            <strong>{{ req.full_name }}</strong><br>
-                            <span style="font-size:0.8rem; color:var(--sub);">{{ req.program }}</span>
+                            <strong>{{{{ req.full_name }}}}</strong><br>
+                            <span style="font-size:0.8rem; color:var(--sub);">{{{{ req.program }}}}</span>
                         </div>
                         <div style="display:flex; gap:5px;">
-                            <a href="/accept_friend/{{ req.account_id }}" class="btn btn-green btn-sm">Accept</a>
-                            <a href="/decline_friend/{{ req.account_id }}" class="btn btn-red btn-sm">Decline</a>
+                            <a href="/accept_friend/{{{{ req.account_id }}}}" class="btn btn-green btn-sm">Accept</a>
+                            <a href="/decline_friend/{{{{ req.account_id }}}}" class="btn btn-red btn-sm">Decline</a>
                         </div>
                     </div>
-                {% endfor %}
+                {{% endfor %}}
             </div>
-            {% endif %}
-            <div class="card">
-                <h3>Daily Check-in</h3>
-                <p style="color:var(--sub); margin-bottom:15px;">How are you feeling today?</p>
-                <form action="/mood_checkin" method="POST">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:20px; font-size:1.8rem;">
-                        <label style="cursor:pointer"><input type="radio" name="level" value="1"> 😫</label>
-                        <label style="cursor:pointer"><input type="radio" name="level" value="2"> 😔</label>
-                        <label style="cursor:pointer"><input type="radio" name="level" value="3"> 😐</label>
-                        <label style="cursor:pointer"><input type="radio" name="level" value="4"> 🙂</label>
-                        <label style="cursor:pointer"><input type="radio" name="level" value="5"> 😄</label>
-                    </div>
-                    <button class="btn" style="width:100%">Log Mood</button>
-                </form>
-            </div>
+            {{% endif %}}
 
             <div class="card" style="border-left: 4px solid var(--blue);">
                 <h3>📅 Upcoming Sessions</h3>
-                {% if sessions %}
-                    {% for s in sessions %}
+                {{% if sessions %}}
+                    {{% for s in sessions %}}
                         <div style="margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid #f0f0f0;">
-                            <strong>With {{ s.counselor_name }}</strong><br>
-                            <span style="font-size:0.9rem; color:var(--text);">{{ s.date_pretty }}</span><br>
-                            <span style="font-size:0.8rem; color:var(--sub);">Topic: {{ s.reason }}</span>
+                            <strong>With {{{{ s.counselor_name }}}}</strong><br>
+                            <span style="font-size:0.9rem; color:var(--text);">{{{{ s.date_pretty }}}}</span><br>
+                            <span style="font-size:0.8rem; color:var(--sub);">Topic: {{{{ s.reason }}}}</span>
                         </div>
-                    {% endfor %}
-                {% else %}
+                    {{% endfor %}}
+                {{% else %}}
                     <p style="color:var(--sub); font-size:0.9rem;">No upcoming sessions scheduled.</p>
                     <a href="/book_appointment" style="font-size:0.85rem; font-weight:bold;">Book Now &rarr;</a>
-                {% endif %}
+                {{% endif %}}
             </div>
 
             <div class="card" style="border-left: 4px solid var(--green);">
                 <h3>📢 Announcements</h3>
-                {% for a in announcements %}
+                {{% for a in announcements %}}
                     <div style="margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid #f0f0f0;">
-                        <strong>{{ a.title }}</strong> <span style="font-size:0.8rem; color:var(--sub); float:right;">{{ a.date_str }}</span><br>
-                        <span style="font-size:0.9rem; color:var(--text);">{{ a.content }}</span>
+                        <strong>{{{{ a.title }}}}</strong> <span style="font-size:0.8rem; color:var(--sub); float:right;">{{{{ a.date_str }}}}</span><br>
+                        <span style="font-size:0.9rem; color:var(--text);">{{{{ a.content }}}}</span>
                     </div>
-                {% endfor %}
+                {{% endfor %}}
             </div>
 
             <div class="card">
                 <h3>Quick Actions</h3>
-                <a href="/match" class="btn btn-outline" style="width:80%; margin-bottom:10px; display:block; text-align:center;">🔥 Find Friends (Match Up)</a>
-                <a href="/book_appointment" class="btn btn-outline" style="width:80%; display:block; text-align:center;">📅 Book Counselor</a>
+                <a href="/match" class="btn btn-outline" style="width:100%; margin-bottom:10px; display:block; text-align:center;">🔥 Find Friends</a>
+                <a href="/book_appointment" class="btn btn-outline" style="width:100%; display:block; text-align:center;">📅 Book Counselor</a>
             </div>
         </div>
     """
@@ -1095,7 +1172,7 @@ def forum():
     
     # --- FETCH POSTS ---
     sql = """
-        SELECT p.*, s.full_name, s.points, a.username, 
+        SELECT p.*, s.full_name, s.avatar_url, s.points, a.username, 
         DATE_FORMAT(p.created_at, '%Y-%m-%d %H:%i') as date_str,
         (SELECT COUNT(*) FROM Comment c WHERE c.post_id = p.post_id) as comment_count
         FROM Post p
@@ -1127,7 +1204,8 @@ def forum():
             'files': file_list,
             'likes': p['likes'], 
             'date': p['date_str'],
-            'comments_count': p['comment_count']
+            'comments_count': p['comment_count'],
+            'avatar': p['avatar_url'] if not p['is_anonymous'] else 'https://api.dicebear.com/7.x/bottts/svg?seed=Anon',
         })
 
     content = """
@@ -1135,67 +1213,41 @@ def forum():
             <div class="card">
                 <form method="POST" enctype="multipart/form-data"> 
                     <div style="display:flex; gap:15px;">
-                        <div class="tweet-avatar" style="background:var(--sub); color:white;">Me</div>
+                        <img src="{{ user.avatar }}" style="width:45px; height:45px; border-radius:50%; object-fit:cover;">
                         <div style="flex:1;">
-                            <textarea name="content" placeholder="What's happening?" rows="2" style="border:none; background:transparent; font-size:1.2rem; resize:none;" required></textarea>
-                            <input type="file" name="file" multiple style="border-bottom:1px solid #eee; border-radius:0; padding:5px; width:100%;">
-                            <small style="color:gray;">Max 5 files (Images, Video, Audio, or Docs)</small>
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-                                <label style="color:var(--blue); font-size:0.9rem; font-weight:600; cursor:pointer;"><input type="checkbox" name="anon"> Post Anon</label>
-                                <button class="btn btn-blue">Tweet</button>
+                            <textarea name="content" placeholder="What's on your mind?" rows="2" style="border:none; background:transparent; font-size:1.1rem; resize:none;" required></textarea>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
+                                <label style="color:var(--blue); font-size:0.9rem; cursor:pointer;"><input type="checkbox" name="anon"> Post Anonymous</label>
+                                <button class="btn btn-blue">Post</button>
                             </div>
                         </div>
                     </div>
                 </form>
             </div>
 
+            <h3 style="margin-top:30px; margin-bottom:15px;">Recent Feed</h3>
+
             {% for post in posts %}
             <div class="card" style="padding-bottom:10px;">
                 <div class="tweet-header">
-                    <div class="tweet-avatar">{{ post.author[0] }}</div>
+                    <img src="{{ post.avatar }}" style="width:48px; height:48px; border-radius:50%; object-fit:cover; margin-right:10px;">
                     <div>
                         <strong class="{% if post.points >= 95 %}rainbow-text{% endif %}">{{ post.author }}</strong> 
                         <span style="color:var(--sub);">@{{ post.author.lower().replace(' ','') }} · {{ post.date }}</span>
                     </div>
                 </div>
-                <div style="padding-left: 50px;">
+                <div style="padding-left: 58px;">
                     <p style="margin:5px 0 15px 0; font-size:1rem; line-height:1.5;">{{ post.content }}</p>
-                    <div class="post-attachments">
-                        {% for file_path in post.files %}
-                            {% set ext = file_path.lower().split('.')[-1] %}
-                            {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
-                                <img src="{{ file_path }}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:10px;">
-                            {% elif ext in ['mp4', 'mov', 'mpeg', 'mpg'] %}
-                                <video controls style="width:100%; border-radius:12px; margin-bottom:10px;">
-                                    <source src="{{ file_path }}" type="video/{{ ext if ext != 'mov' else 'quicktime' }}">
-                                </video>
-                            {% elif ext == 'mp3' %}
-                                <audio controls style="width:100%; margin-bottom:10px;">
-                                    <source src="{{ file_path }}" type="audio/mpeg">
-                                </audio>
-                            {% else %}
-                                <div style="background:#f8f9fa; border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px; display:flex; align-items:center; gap:10px;">
-                                    <span style="font-size:1.2rem;">
-                                        {% if ext in ['doc', 'docx'] %}📘{% elif ext in ['xls', 'xlsx'] %}📗{% else %}📙{% endif %}
-                                    </span>
-                                    <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.85rem;">
-                                        <strong>{{ file_path.split('/')[-1] }}</strong>
-                                    </div>
-                                    <a href="{{ file_path.replace('/upload/', '/upload/fl_attachment/') if (ext == '/image/upload/' in file_path) else file_path }}" download target="_blank" style="color:var(--blue); text-decoration:none; font-weight:bold; font-size:0.8rem;"> </a>
-                                </div>
-                            {% endif %}
-                        {% endfor %}
-                    </div>
                     <div class="tweet-actions">
                         <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
                         <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
-                        <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;">⚠</button>
+                        <button onclick="openReportModal('post', {{ post.id }})" class="tweet-action-btn" style="background:none;border:none;cursor:pointer;">⚠</button>
                     </div>
                 </div>
             </div>
             {% endfor %}
         </div>
-
+        
         <div id="report-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999;">
             <div class="card" style="max-width:400px; margin:100px auto;">
                 <h3>Report Content</h3>
@@ -1208,7 +1260,6 @@ def forum():
                         <option value="Spam">Spam</option>
                         <option value="Inappropriate">Inappropriate</option>
                     </select>
-                    
                     <div style="margin-top:15px; text-align:right;">
                         <button type="button" onclick="document.getElementById('report-modal').style.display='none'" class="btn btn-outline">Cancel</button>
                         <button class="btn btn-red">Submit</button>
@@ -1225,8 +1276,7 @@ def forum():
         }
         </script>
     """
-    return render_page(content, posts=posts_ui)
-
+    return render_page(content, posts=posts_ui, user=user)
 @app.route('/post_detail/<int:pid>', methods=['GET', 'POST'])
 def post_detail(pid):
     # Fetch post
@@ -1598,6 +1648,15 @@ def chat(friend_id):
 @app.route('/profile', methods=['GET', 'POST'])
 def profile():
     user = get_user_by_id(session.get('user_id'))
+
+    AVATAR_OPTIONS = [
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka",
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Buddy",
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Max",
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Luna",
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=Zoe"
+    ]
     
     # 1. HANDLE PROFILE UPDATES
     if request.method == 'POST':
@@ -1606,14 +1665,14 @@ def profile():
         interests = request.form['interests'] 
         
         # Update SQL
-        execute_db("UPDATE Student SET bio = %s, program = %s, interests = %s WHERE student_id = %s", 
-                   (bio, prog, interests, user['student_id']))
+        avatar_url = request.form.get('avatar_url')
+        execute_db("UPDATE Student SET bio = %s, program = %s, interests = %s, avatar_url = %s WHERE student_id = %s", 
+                   (bio, prog, interests, avatar_url, user['student_id']))
         
         flash("Profile updated successfully.")
         return redirect('/profile')
 
     # 2. GET USER DATA
-    # Get posts
     my_posts_raw = query_db("""
         SELECT p.*, (SELECT COUNT(*) FROM Comment c WHERE c.post_id = p.post_id) as c_count 
         FROM Post p WHERE p.student_id = %s ORDER BY created_at DESC
@@ -1630,23 +1689,22 @@ def profile():
             'date': p['created_at'].strftime("%Y-%m-%d")
         })
 
-    # Get friends
     friends_list = []
     for fid in user['friends']:
         friends_list.append(get_user_by_id(fid))
 
-  # 3. RENDER PAGE
+    # 3. RENDER PAGE (FIXED BRACKETS)
     content = """
         <div style="max-width:600px; margin:0 auto;">
             <div class="card" style="padding:0; overflow:visible;">
-                
-                <div class="profile-banner">
-                    </div>
-                
+                <div class="profile-banner"></div>
                 <div style="padding: 0 20px 20px 20px;">
-                    
                     <div class="profile-actions">
                         <button onclick="document.getElementById('edit-modal').style.display='block'" class="btn btn-outline">Edit Profile</button>
+                    </div>
+                    
+                    <div class="profile-avatar">
+                        <img src="{{ user.avatar }}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">
                     </div>
                     
                     <div class="profile-info">
@@ -1673,12 +1731,13 @@ def profile():
             </div>
 
             <div class="grid" style="grid-template-columns: 1fr;">
-                
                 <div id="view-tweets" class="tab-content">
                     {% for post in my_posts %}
                     <div class="card" style="padding-bottom:10px;">
                         <div class="tweet-header">
-                            <div class="tweet-avatar">👤</div>
+                            <div class="tweet-avatar" style="width:40px; height:40px; overflow:hidden; border-radius:50%;">
+                                <img src="{{ user.avatar }}" style="width:100%; height:100%; object-fit:cover;">
+                            </div>
                             <div>
                                 <strong>{{ user.name }}</strong> <span style="color:var(--sub);">@{{ user.username }} · {{ post.date }}</span>
                             </div>
@@ -1686,12 +1745,8 @@ def profile():
                         <div style="padding-left:50px;">
                             <p style="margin-top:5px;">{{ post.content }}</p>
                             <div class="tweet-actions" style="justify-content: flex-start; gap: 20px;">
-                                <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">
-                                    💬 {{ post.comments_count }}
-                                </a>
-                                <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">
-                                    ♥ {{ post.likes }}
-                                </a>
+                                <a href="/post_detail/{{ post.id }}" class="tweet-action-btn blue">💬 {{ post.comments_count }}</a>
+                                <a href="/like_post/{{ post.id }}" class="tweet-action-btn red">♥ {{ post.likes }}</a>
                             </div>
                         </div>
                     </div>
@@ -1710,7 +1765,9 @@ def profile():
                             {% for friend in friends_list %}
                             <div class="friend-row">
                                 <div style="display:flex; gap:10px; align-items:center;">
-                                    <div class="tweet-avatar" style="width:35px; height:35px;">{{ friend.name[0] }}</div>
+                                    <div class="tweet-avatar" style="width:35px; height:35px; overflow:hidden; border-radius:50%;">
+                                        <img src="{{ friend.avatar }}" style="width:100%; height:100%; object-fit:cover;">
+                                    </div>
                                     <div>
                                         <div style="font-weight:700; font-size:0.9rem;">{{ friend.name }}</div>
                                         <div style="font-size:0.8rem; color:var(--sub);">@{{ friend.username }}</div>
@@ -1724,38 +1781,42 @@ def profile():
                         {% endif %}
                     </div>
                 </div>
-                
-                <div id="view-media" class="tab-content" style="display:none;">
-                    <div class="card" style="text-align:center; padding:40px; color:var(--sub);">No media uploaded.</div>
-                </div>
-                <div id="view-likes" class="tab-content" style="display:none;">
-                    <div class="card" style="text-align:center; padding:40px; color:var(--sub);">No likes yet.</div>
-                </div>
-
+                <div id="view-media" class="tab-content" style="display:none;"><div class="card" style="text-align:center; padding:40px; color:var(--sub);">No media uploaded.</div></div>
+                <div id="view-likes" class="tab-content" style="display:none;"><div class="card" style="text-align:center; padding:40px; color:var(--sub);">No likes yet.</div></div>
             </div>
         </div>
 
         <div id="edit-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999;">
-            <div class="card" style="max-width:400px; margin:100px auto;">
+            <div class="card" style="max-width:400px; margin:100px auto; max-height: 80vh; overflow-y: auto;">
                 <h2>Edit Profile</h2>
                 <form method="POST">
+                    <label>Choose Avatar</label>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                        {% for av in avatars %}
+                        <label style="cursor: pointer; text-align: center;">
+                            <input type="radio" name="avatar_url" value="{{ av }}" style="display: none;" 
+                                   {% if user.avatar == av %}checked{% endif %} onchange="highlightAvatar(this)">
+                            <img src="{{ av }}" class="avatar-choice" 
+                                 style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid {% if user.avatar == av %}var(--blue){% else %}transparent{% endif %}; transition: 0.2s;">
+                        </label>
+                        {% endfor %}
+                    </div>
+
                     <label>Program</label>
                     <input type="text" name="program" value="{{ user.program }}">
-                    
                     <label>Interests (comma separated)</label>
-                    <input type="text" name="interests" value="{{ user.interests|join(',') }}" placeholder="gaming, music, art">
-                    
+                    <input type="text" name="interests" value="{{ user.interests|join(',') }}">
                     <label>Bio</label>
                     <textarea name="bio">{{ user.bio }}</textarea>
                     
                     <div style="text-align:right; margin-top:10px;">
                         <button type="button" onclick="document.getElementById('edit-modal').style.display='none'" class="btn btn-outline">Cancel</button>
-                        <button class="btn btn-blue">Save</button>
+                        <button class="btn btn-blue">Save Changes</button>
                     </div>
                 </form>
             </div>
         </div>
-        
+
         <script>
         function openTab(tabName, elm) {
             document.querySelectorAll('.tab-content').forEach(d => d.style.display = 'none');
@@ -1763,9 +1824,16 @@ def profile():
             document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('tab-active'));
             elm.classList.add('tab-active');
         }
+
+        function highlightAvatar(input) {
+            document.querySelectorAll('.avatar-choice').forEach(img => {
+                img.style.borderColor = 'transparent';
+            });
+            input.nextElementSibling.style.borderColor = 'var(--blue)';
+        }
         </script>
     """
-    return render_page(content, user=user, my_posts=my_posts, friends_list=friends_list)
+    return render_page(content, user=user, my_posts=my_posts, friends_list=friends_list, avatars=AVATAR_OPTIONS)
     
 @app.route('/book_appointment', methods=['GET', 'POST'])
 def book_appointment():
