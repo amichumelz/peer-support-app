@@ -1132,7 +1132,7 @@ def forum():
 
     if request.method == 'POST':
         #  handle the forum posting
-        if user['score'] < 60:
+        if user['points'] < 60:
             flash("Restricted users cannot post.")
             return redirect('/forum')
         
