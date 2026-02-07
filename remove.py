@@ -8,22 +8,21 @@ db_config = {
     'port': 26591
 }
 
-def fix_accepted_overload():
+def drop_one_siti_appointment():
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
 
-        # Targeting Siti Counselor (ID 1)
+        # ID Siti Counselor adalah 1
         SITI_ID = 1 
 
-        print(f"🔗 Connected to Aiven. Removing one 'Accepted' case for Counselor ID {SITI_ID}...")
+        print(f"🔗 Connected to Aiven. Dropping latest appointment for Siti (ID {SITI_ID})...")
 
-        # We remove the latest Accepted assignment to reduce the count from 6 to 5
+        # Query untuk membuang temu janji paling baru (ID terbesar) bagi Siti
         query = """
-            DELETE FROM Assignment 
+            DELETE FROM CounselorAppointment 
             WHERE counselor_id = %s 
-            AND status = 'Accepted' 
-            ORDER BY assignment_id DESC 
+            ORDER BY appointment_id DESC 
             LIMIT 1
         """
 
@@ -31,10 +30,10 @@ def fix_accepted_overload():
         
         if cursor.rowcount > 0:
             conn.commit()
-            print(f"🗑 Successfully removed {cursor.rowcount} accepted case.")
-            print("✨ Siti Counselor's caseload should now be 5/5. Refresh your dashboard!")
+            print(f"🗑 Berjaya membuang {cursor.rowcount} rekod temu janji.")
+            print("✨ Sekarang Siti patut ada 5 kes sahaja (jika tadi ada 6). Sila refresh dashboard!")
         else:
-            print("⚠️ No accepted assignments found for this Counselor ID.")
+            print("⚠️ Tiada temu janji dijumpai untuk Siti Counselor.")
 
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -44,4 +43,4 @@ def fix_accepted_overload():
             conn.close()
 
 if __name__ == "__main__":
-    fix_accepted_overload()
+    drop_one_siti_appointment()
