@@ -2380,7 +2380,7 @@ def admin_dashboard():
                 </div>
                 <p style="color:var(--sub);">{{ c.specialization }}</p>
                 <div style="margin-top:10px; font-weight:bold;">
-                    Current Caseload: {{ c.load }} / 20
+                    Current Caseload: {{ c.load }} / 5
                 </div>
                 <div style="background:#eee; height:6px; border-radius:3px; margin-top:5px; width:100%;">
                     <div style="background:var(--blue); height:100%; border-radius:3px; width:{{ (c.load/20)*100 }}%;"></div>
@@ -2421,8 +2421,8 @@ def admin_dashboard():
                                 <select name="counselor_id" required style="margin-bottom:5px;">
                                     <option value="">-- Choose based on capacity --</option>
                                     {% for c in counselors %}
-                                        <option value="{{ c.counselor_id }}">
-                                            {{ c.name }} (Load: {{ c.load }}) - {{ c.specialization }}
+                                        <option value="{{ c.counselor_id }}" {% if c.load >= 5 %}disabled{% endif %}>
+                                            {{ c.name }} (Load: {{ c.load }}) {% if c.load >= 5 %}[FULL]{% endif %}
                                         </option>
                                     {% endfor %}
                                 </select>
