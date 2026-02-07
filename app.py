@@ -2383,7 +2383,7 @@ def admin_dashboard():
                     Current Caseload: {{ c.load }} / 5
                 </div>
                 <div style="background:#eee; height:6px; border-radius:3px; margin-top:5px; width:100%;">
-                    <div style="background:var(--blue); height:100%; border-radius:3px; width:{{ (c.load/20)*100 }}%;"></div>
+                    <div style="background:var(--blue); height:100%; border-radius:3px; width:{{ (c.load/5)*100 }}%;"></div>
                 </div>
             </div>
             {% endfor %}
