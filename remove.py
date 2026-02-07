@@ -8,39 +8,31 @@ db_config = {
     'port': 26591
 }
 
-def drop_one_siti_appointment():
+def force_fix_siti_load():
     try:
         conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
-
-        # ID Siti Counselor adalah 1
         SITI_ID = 1 
 
-        print(f"🔗 Connected to Aiven. Dropping latest appointment for Siti (ID {SITI_ID})...")
+        print(f"🔗 Checking Assignment table for Counselor {SITI_ID}...")
 
-        # Query untuk membuang temu janji paling baru (ID terbesar) bagi Siti
+        # This removes the most recent accepted assignment for Siti
         query = """
-            DELETE FROM CounselorAppointment 
+            DELETE FROM Assignment 
             WHERE counselor_id = %s 
-            ORDER BY appointment_id DESC 
+            AND status = 'Accepted' 
+            ORDER BY assignment_id DESC 
             LIMIT 1
         """
-
         cursor.execute(query, (SITI_ID,))
+        conn.commit()
         
-        if cursor.rowcount > 0:
-            conn.commit()
-            print(f"🗑 Berjaya membuang {cursor.rowcount} rekod temu janji.")
-            print("✨ Sekarang Siti patut ada 5 kes sahaja (jika tadi ada 6). Sila refresh dashboard!")
-        else:
-            print("⚠️ Tiada temu janji dijumpai untuk Siti Counselor.")
+        print(f"🗑 Removed {cursor.rowcount} row(s).")
+        print("✨ Refresh your dashboard now. It should show 5/5.")
 
     except Exception as e:
         print(f"❌ Error: {e}")
     finally:
-        if 'conn' in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        conn.close()
 
-if __name__ == "__main__":
-    drop_one_siti_appointment()
+force_fix_siti_load()
