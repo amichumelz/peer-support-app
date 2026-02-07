@@ -2365,7 +2365,7 @@ def admin_dashboard():
                         <td>{{ r.reason }}</td>
                         <td>{{ r.requested_counselor }}</td>
                         <td>
-                            <form action="/admin/confirm_appt" method="POST" style="display:flex; gap:5px;">
+                            <form action="/admin/confirm_appt" method="POST" style="display:flex; gap:5px;" onsubmit="return validateConfirmation(this)">
                                 <input type="hidden" name="appt_id" value="{{ r.appointment_id }}">
                                 
                                 <select name="final_counselor_id" style="padding:5px; border-radius:4px; border:1px solid #ccc; width:120px;">
@@ -2548,6 +2548,17 @@ def admin_dashboard():
         document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('tab-active'));
         elm.classList.add('tab-active');
     }
+
+    function validateConfirmation(form) {
+        const counselorId = form.final_counselor_id.value;
+        const currentLoad = counselorLoads[counselorId] || 0;
+
+        if (currentLoad >= 5) {
+            alert("❌ Confirmation Failed: This counselor is at full capacity (5/5). Please reassign this student to another available counselor using the dropdown.");
+            return false; 
+        }
+        return confirm('Confirm this appointment?');
+    }
     </script>
     """
     
@@ -2674,6 +2685,18 @@ def process_appeal():
 def admin_confirm_appt():
     appt_id = request.form['appt_id']
     final_cid = request.form['final_counselor_id']
+    
+    cnt = query_db("""
+        SELECT COUNT(DISTINCT student_id) as c FROM (
+            SELECT student_id FROM Assignment WHERE counselor_id = %s AND status='Accepted'
+            UNION
+            SELECT student_id FROM CounselorAppointment WHERE counselor_id = %s AND status='Confirmed'
+        ) as combined
+    """, (final_cid, final_cid), one=True)
+    
+    if cnt and cnt['c'] >= 5:
+        flash("❌ Error: Maximum capacity reached (5/5). Please choose another counselor.")
+        return redirect('/dashboard')
     
     # 1. Update the appointment: Set status to Confirmed and update Counselor ID (in case admin changed it)
     execute_db("""
