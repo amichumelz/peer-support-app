@@ -1970,8 +1970,8 @@ def admin_dashboard():
         c['name'] = c['full_name']
         
         # Determine status
-        c['status'] = 'Available' if c['load'] < 20 else 'Full Capacity'
-        c['status_color'] = 'green' if c['load'] < 20 else 'red'
+        c['status'] = 'Available' if c['load'] < 5 else 'Full Capacity'
+        c['status_color'] = 'green' if c['load'] < 5 else 'red'
         
         counselors.append(c)
 
