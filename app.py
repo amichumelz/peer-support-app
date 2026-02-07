@@ -2306,6 +2306,23 @@ def admin_dashboard():
         document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('tab-active'));
         elm.classList.add('tab-active');
     }
+
+    const counselorLoads = {
+        {% for c in counselors %}
+            "{{ c.counselor_id }}": {{ c.load }},
+        {% endfor %}
+    };
+
+    function validateAssignment(form) {
+        const counselorId = form.counselor_id.value;
+        const currentLoad = counselorLoads[counselorId] || 0;
+
+        if (currentLoad >= 5) {
+            alert("❌ Assignment Failed: This counselor has reached the maximum capacity of 5 students. Please select another available counselor.");
+            return false; // This stops the form from submitting
+        }
+        return confirm('Confirm counselor assignment?');
+    }
     </script>
 
     <div id="view-counselors" class="tab-content">
@@ -2414,7 +2431,7 @@ def admin_dashboard():
                     <td>{{ a.last_checkin }}</td>
                     <td>
                         {% if not a.is_assigned %}
-                            <form action="/admin/assign_counselor" method="POST" style="background:#f9f9f9; padding:10px; border-radius:8px;">
+                            <form action="/admin/assign_counselor" method="POST" style="background:#f9f9f9; padding:10px; border-radius:8px;" onsubmit="return validateAssignment(this)">
                                 <input type="hidden" name="student_id" value="{{ a.student_id }}">
                                 
                                 <label style="font-size:0.8rem; font-weight:bold;">Select Counselor:</label>
@@ -2557,6 +2574,18 @@ def admin_dashboard():
 def assign_counselor_logic():
     sid = int(request.form['student_id'])
     cid = int(request.form['counselor_id']) # comes from the Dropdown
+    
+    cnt = query_db("""
+        SELECT COUNT(DISTINCT student_id) as c FROM (
+            SELECT student_id FROM Assignment WHERE counselor_id = %s AND status='Accepted'
+            UNION
+            SELECT student_id FROM CounselorAppointment WHERE counselor_id = %s AND status='Confirmed'
+        ) as combined
+    """, (cid, cid), one=True)
+    
+    if cnt and cnt['c'] >= 5:
+        flash("❌ Maximum capacity reached for this counselor.")
+        return redirect('/dashboard')
     
     execute_db("INSERT INTO Assignment (student_id, counselor_id, status) VALUES (%s, %s, 'Pending')", (sid, cid))
     
@@ -2804,10 +2833,14 @@ def counselor_dashboard():
     """, (cid,))
     
     upcoming = query_db("""
-        SELECT c.*, s.full_name as s_name 
-        FROM CounselorAppointment c JOIN Student s ON c.student_id=s.student_id 
-        WHERE c.counselor_id=%s AND c.status='Confirmed'
-    """, (cid,))
+    SELECT c.*, s.full_name as s_name 
+    FROM CounselorAppointment c 
+    JOIN Student s ON c.student_id = s.student_id 
+    WHERE c.counselor_id = %s 
+      AND c.status = 'Confirmed'
+      AND c.appointment_date >= NOW()  -- ADD THIS LINE to hide past dates
+    ORDER BY c.appointment_date ASC
+""", (cid,))
     
     content = """
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
