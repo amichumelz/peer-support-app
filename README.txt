@@ -18,7 +18,7 @@ STEP 0: ACCESS LIVE SYSTEM (RENDERED)
 ------------------------------------------------------------------------------
 You can access the fully functional, live version of the system here:
 
-Live URL: [INSERT YOUR RENDER LINK HERE]
+Live URL: https://peer-support-app.onrender.com
 
 ------------------------------------------------------------------------------
 STEP 1: DATABASE SETUP
@@ -66,7 +66,6 @@ STEP 5: DEMO ACCOUNTS (Password: '123' for all)
 | Moderator | mod      | Review Reports, Flag Users, Announcements  |
 | Counselor | counselor| Manage Caseload, Action Plans, Session Note|
 | Student   | ashley   | Forum Posting, Mood Logs, Peer Matching    |
-| Student   | help     | Restricted Account (Requires Admin Appeal) |
 
 ==============================================================================
 SYSTEM LOGS & VERIFICATION
